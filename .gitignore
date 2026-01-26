@@ -1,0 +1,36 @@
+# OS
+.DS_Store
+
+# Node
+**/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Env
+.env
+**/.env
+
+# Backend artifacts
+backend/cache/
+backend/checkpoints/
+backend/images/
+backend/my-finetuned-model/
+backend/finetune_triple/
+backend/video_image_embeddings.npy
+backend/*.npy
+backend/*.safetensors
+backend/*.pt
+backend/*.ckpt
+backend/*.bin
+backend/ranked_results.csv
+backend/videos.csv
+backend/finetune_data.csv
+
+# Legacy folder (post-rename)
+multimodal approach/

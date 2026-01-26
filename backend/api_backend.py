@@ -1,0 +1,499 @@
+"""
+FastAPI Backend for LockIn - Multimodal Playlist Video Ranker
+
+This is the REST API backend that exposes the multimodal ranking system
+to the frontend. It provides endpoints for:
+- Ranking videos from a YouTube playlist
+- Health checks
+- API status
+
+Run with:
+    uvicorn api_backend:app --reload --host 0.0.0.0 --port 8000
+"""
+
+import os
+import logging
+from typing import List, Optional
+from datetime import datetime
+from functools import lru_cache
+
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, validator
+import uvicorn
+
+from playlist_ranker import PlaylistRanker
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# --- Initialize FastAPI App ---
+app = FastAPI(
+    title="LockIn API",
+    description="Multimodal Video Ranking System for YouTube Playlists",
+    version="1.0.0",
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc"  # ReDoc
+)
+
+# --- CORS Configuration ---
+# Allow frontend to make requests from any origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify actual frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    expose_headers=["*"],
+    allow_headers=["*"],
+)
+
+# --- Global State ---
+PLAYLIST_RANKER: Optional[PlaylistRanker] = None
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+
+def initialize_ranker():
+    """Initialize the playlist ranker on startup."""
+    global PLAYLIST_RANKER
+    if not YOUTUBE_API_KEY:
+        logger.warning("YOUTUBE_API_KEY not set. API will not function properly.")
+        return False
+    
+    try:
+        logger.info("Initializing PlaylistRanker...")
+        PLAYLIST_RANKER = PlaylistRanker(api_key=YOUTUBE_API_KEY)
+        logger.info("PlaylistRanker initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize PlaylistRanker: {e}")
+        return False
+
+
+# --- Startup and Shutdown Events ---
+@app.on_event("startup")
+async def startup_event():
+    """Run on server startup."""
+    logger.info("Server starting up...")
+    initialize_ranker()
+    logger.info("Server ready to handle requests")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Run on server shutdown."""
+    logger.info("Server shutting down...")
+
+
+# --- Pydantic Models (Request/Response Schemas) ---
+
+class RankingRequest(BaseModel):
+    """Request model for ranking a playlist."""
+    playlist_url: str = Field(
+        ...,
+        description="YouTube playlist URL",
+        example="https://www.youtube.com/playlist?list=PLGYFklY8P7l16uxGixgxGxWvteNuL1Psb"
+    )
+    user_intent: str = Field(
+        ...,
+        description="Natural language description of what user wants to learn",
+        example="I want to learn linear algebra"
+    )
+    min_score: float = Field(
+        default=0.0,
+        description="Minimum relevance score (0.0 to 1.0) to include in results",
+        ge=0.0,
+        le=1.0
+    )
+    limit: int = Field(
+        default=10,
+        description="Maximum number of results to return",
+        ge=1,
+        le=100
+    )
+    
+    @validator('playlist_url')
+    def validate_playlist_url(cls, v):
+        """Validate that the URL is a YouTube playlist URL."""
+        if not v or "list=" not in v:
+            raise ValueError("Invalid YouTube playlist URL (missing list=)")
+        return v
+    
+    @validator('user_intent')
+    def validate_user_intent(cls, v):
+        """Validate that user intent is not empty."""
+        if not v or len(v.strip()) == 0:
+            raise ValueError("User intent cannot be empty")
+        return v.strip()
+
+
+class VideoRequest(BaseModel):
+    """Request model for single video lookup."""
+    video_url: str = Field(
+        ...,
+        description="YouTube video URL or ID",
+        example="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
+
+    @validator('video_url')
+    def validate_video_url(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Video URL cannot be empty")
+        return v.strip()
+
+
+class VideoResult(BaseModel):
+    """Response model for a single video result."""
+    rank: int
+    video_id: str
+    title: str
+    description: str
+    final_score: float
+    text_score: float
+    visual_score: float
+    thumbnail_url: str
+    thumbnail_url_hq: str
+    thumbnail_url_max: Optional[str]
+    youtube_url: str
+    published_at: Optional[str]
+
+
+class RankingResponse(BaseModel):
+    """Response model for ranking results."""
+    status: str = Field(default="success", description="Response status")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
+    playlist_url: str = Field(description="URL of the ranked playlist")
+    user_intent: str = Field(description="User's search intent")
+    total_videos: int = Field(description="Total videos in playlist")
+    returned_results: int = Field(description="Number of results returned after filtering")
+    videos: List[VideoResult] = Field(description="List of ranked videos")
+
+
+class HealthResponse(BaseModel):
+    """Response model for health check."""
+    status: str
+    timestamp: datetime
+    ranker_ready: bool
+    api_key_configured: bool
+    version: str
+
+
+class ErrorResponse(BaseModel):
+    """Response model for errors."""
+    status: str = "error"
+    timestamp: datetime = Field(default_factory=datetime.now)
+    message: str
+    detail: Optional[str] = None
+
+
+@app.post("/video", response_model=VideoResult, tags=["Video"])
+async def get_video(request: VideoRequest):
+    """Fetch metadata for a single YouTube video."""
+    if not PLAYLIST_RANKER:
+        logger.error("PlaylistRanker not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="API not ready. YouTube API key may not be configured."
+        )
+
+    try:
+        parser = PLAYLIST_RANKER.parser
+        video_id = parser._get_video_id_from_url(request.video_url)
+        details = parser.fetch_video_details(video_id, use_cache=True)
+
+        if not details:
+            raise HTTPException(
+                status_code=400,
+                detail="Please make sure the YouTube video is public and available."
+            )
+
+        thumbnail_url_hq = parser.get_thumbnail_url(video_id, quality="hqdefault")
+        thumbnail_url_max = parser.get_thumbnail_url(video_id, quality="maxresdefault")
+
+        return VideoResult(
+            rank=1,
+            video_id=video_id,
+            title=details.get("title", ""),
+            description=details.get("description", ""),
+            final_score=1.0,
+            text_score=1.0,
+            visual_score=1.0,
+            thumbnail_url=details.get("thumbnail_url", thumbnail_url_hq),
+            thumbnail_url_hq=thumbnail_url_hq,
+            thumbnail_url_max=thumbnail_url_max,
+            youtube_url=f"https://www.youtube.com/watch?v={video_id}",
+            published_at=details.get("published_at")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error during video lookup")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# --- API Endpoints ---
+
+@app.get("/", tags=["Health"])
+async def root():
+    """Root endpoint - provides API information."""
+    return {
+        "name": "LockIn API",
+        "version": "1.0.0",
+        "description": "Multimodal Video Ranking System for YouTube Playlists",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def health_check():
+    """
+    Health check endpoint.
+    
+    Returns:
+        HealthResponse: Current status of the API and its dependencies
+    """
+    return HealthResponse(
+        status="healthy" if PLAYLIST_RANKER else "degraded",
+        timestamp=datetime.now(),
+        ranker_ready=PLAYLIST_RANKER is not None,
+        api_key_configured=bool(YOUTUBE_API_KEY),
+        version="1.0.0"
+    )
+
+
+@app.post("/rank", response_model=RankingResponse, tags=["Ranking"])
+async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTasks):
+    """
+    Rank videos from a YouTube playlist based on user intent.
+    
+    This endpoint:
+    1. Fetches all videos from the YouTube playlist
+    2. Generates text embeddings from titles/descriptions
+    3. Generates visual embeddings from thumbnails
+    4. Ranks videos using weighted combination
+    5. Returns top results sorted by relevance
+    
+    Args:
+        request: RankingRequest with playlist URL and user intent
+        
+    Returns:
+        RankingResponse: Ranked videos with scores and metadata
+        
+    Raises:
+        HTTPException: If playlist is invalid or ranking fails
+    """
+    
+    # Validate API is ready
+    if not PLAYLIST_RANKER:
+        logger.error("PlaylistRanker not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="API not ready. YouTube API key may not be configured."
+        )
+    
+    try:
+        logger.info(f"Ranking request: playlist={request.playlist_url[:50]}..., intent={request.user_intent}")
+        
+        # Rank the playlist
+        ranked_videos = PLAYLIST_RANKER.rank_playlist(
+            request.playlist_url,
+            request.user_intent
+        )
+        
+        if not ranked_videos:
+            raise HTTPException(
+                status_code=400,
+                detail="Please make your YouTube playlist public to continue"
+            )
+        
+        # Filter by minimum score
+        filtered_videos = [
+            v for v in ranked_videos if v['final_score'] >= request.min_score
+        ]
+        
+        # Limit results
+        limited_videos = filtered_videos[:request.limit]
+        
+        # Add rank field
+        for rank, video in enumerate(limited_videos, 1):
+            video['rank'] = rank
+        
+        # Create response
+        response = RankingResponse(
+            status="success",
+            timestamp=datetime.now(),
+            playlist_url=request.playlist_url,
+            user_intent=request.user_intent,
+            total_videos=len(ranked_videos),
+            returned_results=len(limited_videos),
+            videos=[VideoResult(**v) for v in limited_videos]
+        )
+        
+        logger.info(f"Successfully ranked {len(limited_videos)} videos from {len(ranked_videos)} total")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error during ranking: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@app.get("/rank-fixed", response_model=RankingResponse, tags=["Ranking"])
+async def rank_fixed_library(
+    user_intent: str = Query(..., description="What would you like to focus on?"),
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of results"),
+    min_score: float = Query(0.0, ge=0.0, le=1.0, description="Minimum relevance score")
+):
+    """
+    Rank videos from the fixed library (videos.csv).
+    
+    This endpoint ranks against the pre-loaded video library instead of
+    fetching from YouTube. Useful for testing and demo purposes.
+    
+    Args:
+        user_intent: Natural language query
+        limit: Maximum results to return
+        min_score: Minimum relevance score
+        
+    Returns:
+        RankingResponse: Ranked videos
+    """
+    try:
+        from video_ranker_multimodal import get_ranked_videos
+        
+        logger.info(f"Fixed library ranking: intent={user_intent}")
+        
+        ranked_videos = get_ranked_videos(user_intent)
+        
+        if not ranked_videos:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not load fixed video library"
+            )
+        
+        # Filter and limit
+        filtered = [v for v in ranked_videos if v.get('final_score', 0) >= min_score]
+        limited = filtered[:limit]
+        
+        # Transform to proper format
+        transformed_videos = []
+        for rank, video in enumerate(limited, 1):
+            thumb_path = video.get('thumbnail_path', '')
+            transformed = {
+                'rank': rank,
+                'video_id': video.get('title', '').replace(' ', '_')[:20],
+                'title': video.get('title', ''),
+                'description': video.get('transcript', ''),  # Use transcript as description
+                'final_score': video.get('final_score', 0),
+                'text_score': video.get('text_score', 0),
+                'visual_score': video.get('visual_score', 0),
+                'thumbnail_url': thumb_path,
+                'thumbnail_url_hq': thumb_path,
+                'thumbnail_url_max': thumb_path,
+                'youtube_url': "#",  # Placeholder
+                'published_at': None
+            }
+            transformed_videos.append(transformed)
+        
+        response = RankingResponse(
+            status="success",
+            playlist_url="fixed://library",
+            user_intent=user_intent,
+            total_videos=len(ranked_videos),
+            returned_results=len(limited),
+            videos=[VideoResult(**v) for v in transformed_videos]
+        )
+        
+        logger.info(f"Fixed library: returned {len(limited)} videos")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in fixed library ranking: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error ranking fixed library: {str(e)}"
+        )
+
+
+@app.get("/info", tags=["Info"])
+async def api_info():
+    """Get API information and configuration."""
+    return {
+        "name": "LockIn Multimodal Ranking API",
+        "version": "1.0.0",
+        "endpoints": {
+            "GET /": "Root endpoint",
+            "GET /health": "Health check",
+            "POST /rank": "Rank YouTube playlist videos",
+            "GET /rank-fixed": "Rank fixed library videos",
+            "GET /docs": "Swagger UI documentation",
+            "GET /redoc": "ReDoc documentation",
+            "GET /info": "API information"
+        },
+        "models": {
+            "text": "./my-finetuned-model",
+            "visual": "clip-ViT-B-32"
+        },
+        "weights": {
+            "text_weight": 0.7,
+            "visual_weight": 0.3
+        }
+    }
+
+
+# --- Error Handlers ---
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request, exc):
+    """Handle ValueError exceptions."""
+    logger.error(f"ValueError: {exc}")
+    return {
+        "status": "error",
+        "message": str(exc),
+        "timestamp": datetime.now()
+    }
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Handle unexpected exceptions."""
+    logger.error(f"Unexpected error: {exc}", exc_info=True)
+    return {
+        "status": "error",
+        "message": "An unexpected error occurred",
+        "timestamp": datetime.now()
+    }
+
+
+# --- Development Entry Point ---
+
+if __name__ == "__main__":
+    # Check if API key is set
+    if not YOUTUBE_API_KEY:
+        print("WARNING: YOUTUBE_API_KEY environment variable not set!")
+        print("The /rank endpoint will not work without it.")
+        print("Set it with: export YOUTUBE_API_KEY='your_key_here'")
+    
+    # Run the server
+    uvicorn.run(
+        "api_backend:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

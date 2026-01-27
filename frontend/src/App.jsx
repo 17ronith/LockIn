@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
@@ -9,7 +9,7 @@ import viteIcon from './assets/Vite.js Icon.png'
 import openaiIcon from './assets/OpenAI Logo Icon 50.png'
 import llamaIcon from './assets/LLaMA Model Icon.png'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const EXIT_PHRASE = "I don't want to achieve my goals"
 const DEFAULT_FOCUS_MINUTES = 25
 const DEFAULT_BREAK_MINUTES = 5
@@ -79,6 +79,16 @@ function App() {
   const [loadingZeroAt, setLoadingZeroAt] = useState(null)
   const [loadingStartedAt, setLoadingStartedAt] = useState(null)
   const [focusPaused, setFocusPaused] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lockin_user') || 'null')
+    } catch {
+      return null
+    }
+  })
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('lockin_token') || '')
+  const [authError, setAuthError] = useState('')
 
   const loadingTips = [
     'Breathe in — breathe out.',
@@ -89,8 +99,12 @@ function App() {
   ]
   const playerStartRef = useRef(0)
   const playerTimestampRef = useRef(Date.now())
+  const userMenuRef = useRef(null)
+  const externalLaunchHandledRef = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+  const googleLoadedRef = useRef(false)
 
   const TailwindIcon = () => (
     <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
@@ -106,6 +120,28 @@ function App() {
     if (!trimmed) return ''
     if (/^https?:\/\//i.test(trimmed)) return trimmed
     return `https://${trimmed}`
+  }
+
+  const decodeGoogleCredential = (credential) => {
+    try {
+      const payload = credential.split('.')[1]
+      if (!payload) return null
+      const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')
+      const json = atob(padded)
+      const data = JSON.parse(json)
+      if (!data?.sub) return null
+      return {
+        id: data.sub,
+        email: data.email || '',
+        name: data.name || '',
+        given_name: data.given_name,
+        family_name: data.family_name,
+        picture: data.picture
+      }
+    } catch {
+      return null
+    }
   }
 
   const isPlaylistUrl = (value) => {
@@ -146,6 +182,228 @@ function App() {
 
   const isVideoUrl = (value) => Boolean(extractVideoId(value))
   const showIntentField = isPlaylistUrl(playlistUrl)
+  const isAuthRoute = location.pathname === '/login' || location.pathname === '/signup'
+  const isResultsRoute = location.pathname === '/results'
+
+  const clearPendingSubmission = () => {
+    localStorage.removeItem('lockin_pending_url')
+    localStorage.removeItem('lockin_pending_intent')
+  }
+
+  const submitUrl = useCallback(async (urlValue, intentValue) => {
+    const trimmedUrl = urlValue.trim()
+    const trimmedIntent = intentValue.trim()
+
+    setError('')
+    setLoading(true)
+
+    try {
+      if (isPlaylistUrl(trimmedUrl)) {
+        if (!trimmedIntent) {
+          setError('Please enter a learning goal for playlist ranking.')
+          return
+        }
+        const response = await axios.post(`${API_URL}/rank`, {
+          playlist_url: trimmedUrl,
+          user_intent: trimmedIntent,
+          limit: 9,
+          min_score: 0.0,
+        })
+        setResults(response.data)
+      } else if (isVideoUrl(trimmedUrl)) {
+        const response = await axios.post(`${API_URL}/video`, {
+          video_url: trimmedUrl,
+        })
+        const video = response.data
+        setResults({
+          status: 'success',
+          timestamp: new Date().toISOString(),
+          playlist_url: trimmedUrl,
+          user_intent: trimmedIntent || 'Single video',
+          total_videos: 1,
+          returned_results: 1,
+          videos: [video]
+        })
+        setPendingVideo(video)
+        setShowSessionSetup(true)
+      } else {
+        setError('Please enter a valid YouTube playlist or video URL.')
+      }
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        err.message ||
+        'Failed to rank playlist. Check the URL and try again.'
+      )
+      console.error('Error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [isPlaylistUrl, isVideoUrl])
+
+  const handleGoogleCredential = useCallback(async (credential) => {
+    if (!credential) return
+    setAuthError('')
+    try {
+      const response = await axios.post(`${API_URL}/auth/google`, {
+        credential,
+      })
+      const user = response.data.user
+      const token = response.data.token || credential
+      setAuthUser(user)
+      setAuthToken(token)
+      localStorage.setItem('lockin_user', JSON.stringify(user))
+      localStorage.setItem('lockin_token', token)
+
+      const pendingUrl = localStorage.getItem('lockin_pending_url') || ''
+      const pendingIntent = localStorage.getItem('lockin_pending_intent') || ''
+      clearPendingSubmission()
+      navigate('/')
+
+      if (pendingUrl) {
+        setPlaylistUrl(pendingUrl)
+        setUserIntent(pendingIntent)
+        await submitUrl(pendingUrl, pendingIntent)
+      }
+    } catch (err) {
+      if (err.response) {
+        setAuthError(
+          err.response?.data?.detail ||
+          err.message ||
+          'Unable to sign in with Google. Please try again.'
+        )
+        return
+      }
+
+      const fallbackUser = decodeGoogleCredential(credential)
+      if (fallbackUser) {
+        const pendingUrl = localStorage.getItem('lockin_pending_url') || ''
+        const pendingIntent = localStorage.getItem('lockin_pending_intent') || ''
+        setAuthUser(fallbackUser)
+        setAuthToken(credential)
+        localStorage.setItem('lockin_user', JSON.stringify(fallbackUser))
+        localStorage.setItem('lockin_token', credential)
+        clearPendingSubmission()
+        navigate('/')
+        if (pendingUrl) {
+          setPlaylistUrl(pendingUrl)
+          setUserIntent(pendingIntent)
+          await submitUrl(pendingUrl, pendingIntent)
+        }
+        return
+      }
+      setAuthError(
+        err.response?.data?.detail ||
+        err.message ||
+        'Unable to sign in with Google. Please try again.'
+      )
+    }
+  }, [navigate, submitUrl])
+
+  const handleLogout = () => {
+    setAuthUser(null)
+    setAuthToken('')
+    localStorage.removeItem('lockin_user')
+    localStorage.removeItem('lockin_token')
+    navigate('/')
+  }
+
+  const handleHome = () => {
+    if (location.pathname === '/results' && selectedVideo) {
+      requestExit('__reset__')
+      return
+    }
+    if (location.pathname === '/results') {
+      setResults(null)
+      setSelectedVideo(null)
+      setPendingVideo(null)
+      setShowSessionSetup(false)
+    }
+    navigate('/')
+  }
+
+  useEffect(() => {
+    if (!googleClientId || googleLoadedRef.current) return
+
+    const script = document.createElement('script')
+    script.src = 'https://accounts.google.com/gsi/client'
+    script.async = true
+    script.defer = true
+    script.onload = () => {
+      if (!window.google?.accounts?.id) return
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: (response) => handleGoogleCredential(response.credential),
+        auto_select: true,
+        itp_support: true
+      })
+      googleLoadedRef.current = true
+    }
+    document.body.appendChild(script)
+
+    return () => {
+      script.onload = null
+    }
+  }, [googleClientId, handleGoogleCredential])
+
+  useEffect(() => {
+    if (authUser && isAuthRoute) {
+      navigate('/')
+      return
+    }
+    if (authUser || !isAuthRoute) return
+    if (window.google?.accounts?.id) {
+      const targetId = location.pathname === '/signup' ? 'google-signup' : 'google-login'
+      const container = document.getElementById(targetId)
+      if (container && !container.dataset.rendered) {
+        window.google.accounts.id.renderButton(container, {
+          theme: 'outline',
+          size: 'large',
+          width: 320,
+          shape: 'pill'
+        })
+        container.dataset.rendered = 'true'
+      }
+      window.google.accounts.id.prompt()
+    }
+  }, [authUser, isAuthRoute, location.pathname, navigate])
+
+  useEffect(() => {
+    if (externalLaunchHandledRef.current) return
+    const params = new URLSearchParams(location.search)
+    const incomingUrl = params.get('video') || params.get('url')
+    if (!incomingUrl) return
+
+    externalLaunchHandledRef.current = true
+    const decodedUrl = decodeURIComponent(incomingUrl)
+    setPlaylistUrl(decodedUrl)
+    setUserIntent('')
+
+    if (!authUser) {
+      localStorage.setItem('lockin_pending_url', decodedUrl)
+      localStorage.setItem('lockin_pending_intent', '')
+      navigate('/signup', { replace: true })
+      return
+    }
+
+    submitUrl(decodedUrl, '')
+  }, [authUser, location.search, navigate, submitUrl])
+
+  useEffect(() => {
+    if (!showUserMenu) return
+    const handleClickOutside = (event) => {
+      if (!userMenuRef.current) return
+      if (!userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showUserMenu])
+
+  useEffect(() => {
+    setShowUserMenu(false)
+  }, [location.pathname])
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {
@@ -301,52 +559,14 @@ function App() {
 
   const handleRankPlaylist = async (e) => {
     e.preventDefault()
-    setError('')
-    setLoading(true)
-    const trimmedUrl = playlistUrl.trim()
-
-    try {
-      if (isPlaylistUrl(trimmedUrl)) {
-        if (!userIntent.trim()) {
-          setError('Please enter a learning goal for playlist ranking.')
-          return
-        }
-        const response = await axios.post(`${API_URL}/rank`, {
-          playlist_url: trimmedUrl,
-          user_intent: userIntent,
-          limit: 9,
-          min_score: 0.0,
-        })
-        setResults(response.data)
-      } else if (isVideoUrl(trimmedUrl)) {
-        const response = await axios.post(`${API_URL}/video`, {
-          video_url: trimmedUrl,
-        })
-        const video = response.data
-        setResults({
-          status: 'success',
-          timestamp: new Date().toISOString(),
-          playlist_url: trimmedUrl,
-          user_intent: userIntent || 'Single video',
-          total_videos: 1,
-          returned_results: 1,
-          videos: [video]
-        })
-        setPendingVideo(video)
-        setShowSessionSetup(true)
-      } else {
-        setError('Please enter a valid YouTube playlist or video URL.')
-      }
-    } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-        err.message ||
-        'Failed to rank playlist. Check the URL and try again.'
-      )
-      console.error('Error:', err)
-    } finally {
-      setLoading(false)
+    if (!authUser) {
+      localStorage.setItem('lockin_pending_url', playlistUrl)
+      localStorage.setItem('lockin_pending_intent', userIntent)
+      navigate('/signup')
+      return
     }
+
+    await submitUrl(playlistUrl, userIntent)
   }
 
   const handleWatchInApp = (video) => {
@@ -608,13 +828,41 @@ function App() {
       {/* Navigation */}
       <nav className="navbar">
         <div className="navbar-content">
-          <div className="logo">LockIn</div>
-          <button
-            className="btn btn-secondary"
-            onClick={() => requestExit('__reset__')}
-          >
-            Exit
-          </button>
+          <button className="navbar-brand" onClick={handleHome}>LockIn</button>
+          <div className="navbar-user" ref={userMenuRef}>
+            <button
+              className="user-trigger"
+              onClick={() => setShowUserMenu((prev) => !prev)}
+              aria-haspopup="menu"
+              aria-expanded={showUserMenu}
+            >
+              {authUser?.given_name || authUser?.name || 'Account'}
+              <span className="user-caret">⌄</span>
+            </button>
+            {showUserMenu && (
+              <div className="user-menu" role="menu">
+                {authUser ? (
+                  <>
+                    <button className="user-menu-item" type="button" disabled>
+                      Settings
+                    </button>
+                    <button className="user-menu-item" type="button" onClick={handleLogout}>
+                      Log out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="user-menu-item" type="button" onClick={() => navigate('/login')}>
+                      Log in
+                    </button>
+                    <button className="user-menu-item" type="button" onClick={() => navigate('/signup')}>
+                      Sign up
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -706,6 +954,67 @@ function App() {
                       </div>
                     </motion.div>
 
+                  </motion.section>
+                </AnimationWrapper>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <AnimationWrapper key={location.pathname}>
+                  <motion.section
+                    className="auth-page"
+                    variants={stagger}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                  >
+                    <motion.div className="auth-card" variants={item}>
+                      <div className="auth-badge">Free</div>
+                      <div className="auth-header">
+                        <h2 className="auth-title">Quick sign up</h2>
+                        <p className="auth-subtitle">LockIn is free. Sign up with Google to keep your sessions and streaks.</p>
+                      </div>
+                      {!googleClientId && (
+                        <div className="error-message">Google login is not configured.</div>
+                      )}
+                      <div className="auth-google" id="google-signup"></div>
+                      {authError && <div className="error-message">{authError}</div>}
+                      <div className="auth-footer">
+                        <span>Already have an account?</span>
+                        <button className="auth-link" type="button" onClick={() => navigate('/login')}>Sign in</button>
+                      </div>
+                    </motion.div>
+                  </motion.section>
+                </AnimationWrapper>
+              }
+            />
+            <Route
+              path="/login"
+              element={
+                <AnimationWrapper key={location.pathname}>
+                  <motion.section
+                    className="auth-page"
+                    variants={stagger}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                  >
+                    <motion.div className="auth-card" variants={item}>
+                      <div className="auth-header">
+                        <h2 className="auth-title">Welcome back</h2>
+                        <p className="auth-subtitle">Sign in with Google to continue your focus sessions.</p>
+                      </div>
+                      {!googleClientId && (
+                        <div className="error-message">Google login is not configured.</div>
+                      )}
+                      <div className="auth-google" id="google-login"></div>
+                      {authError && <div className="error-message">{authError}</div>}
+                      <div className="auth-footer">
+                        <span>Need an account?</span>
+                        <button className="auth-link" type="button" onClick={() => navigate('/signup')}>Sign up</button>
+                      </div>
+                    </motion.div>
                   </motion.section>
                 </AnimationWrapper>
               }

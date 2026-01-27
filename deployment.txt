@@ -1,0 +1,8 @@
+Plan: Google OAuth + Postgres persistence
+You’ll add Google OAuth for user identity, then persist sessions/streaks in Postgres, and finally wire the frontend to read/write those stats instead of localStorage. This keeps current UX but makes history durable and multi‑device.
+
+Steps 4
+Define OAuth flow in deployment.txt: Google Sign‑In, callback URL, required scopes.
+Create Postgres schema for users and session history, plus streak logic rules.
+Add backend endpoints: auth start/callback, GET /me, POST /sessions/complete.
+Replace frontend localStorage with API calls in App.jsx.

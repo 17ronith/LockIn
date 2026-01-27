@@ -17,7 +17,7 @@ IMAGE_EMBEDDINGS_FILE = 'video_image_embeddings.npy'
 TEXT_WEIGHT = 0.7
 VISUAL_WEIGHT = 0.3
 
-# --- Pre-load all models and data ---
+# --- Pre-load all models and data --- //
 # This code runs ONCE when the script is imported.
 try:
     print("Loading models and data... (This may take a moment)")

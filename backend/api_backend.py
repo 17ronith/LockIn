@@ -13,13 +13,18 @@ Run with:
 
 import os
 import logging
+import base64
+import json
 from typing import List, Optional
 from datetime import datetime
 from functools import lru_cache
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+from supabase import create_client, Client
 import uvicorn
 
 from playlist_ranker import PlaylistRanker
@@ -54,6 +59,9 @@ app.add_middleware(
 # --- Global State ---
 PLAYLIST_RANKER: Optional[PlaylistRanker] = None
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 
 def initialize_ranker():
@@ -71,6 +79,54 @@ def initialize_ranker():
     except Exception as e:
         logger.error(f"Failed to initialize PlaylistRanker: {e}")
         return False
+
+
+@lru_cache(maxsize=1)
+def _decode_jwt_payload(token: str) -> Optional[dict]:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8"))
+        return json.loads(decoded.decode("utf-8"))
+    except Exception:
+        return None
+
+
+def get_supabase_client() -> Optional[Client]:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return None
+    client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+    payload = _decode_jwt_payload(SUPABASE_SERVICE_ROLE_KEY)
+    if payload and payload.get("role") != "service_role":
+        logger.warning("Supabase key is not a service role key. Writes may be blocked by RLS.")
+    return client
+
+
+def upsert_user_in_supabase(payload: dict) -> dict:
+    client = get_supabase_client()
+    if not client:
+        raise RuntimeError("Supabase client not configured")
+
+    google_sub = payload.get("sub")
+    if not google_sub:
+        return None
+
+    record = {
+        "google_sub": google_sub,
+        "email": payload.get("email"),
+        "name": payload.get("name"),
+        "picture": payload.get("picture")
+    }
+
+    result = client.table("users").upsert(record, on_conflict="google_sub").execute()
+    if getattr(result, "error", None):
+        raise RuntimeError(f"Supabase error: {result.error}")
+    if result.data:
+        return result.data[0]
+    raise RuntimeError("Supabase upsert returned no data")
 
 
 # --- Startup and Shutdown Events ---
@@ -187,6 +243,145 @@ class ErrorResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     message: str
     detail: Optional[str] = None
+
+
+class AuthRequest(BaseModel):
+    """Request model for Google OAuth login."""
+    credential: str = Field(..., description="Google ID token credential")
+
+
+class UserProfile(BaseModel):
+    """User profile returned after authentication."""
+    id: str
+    email: str
+    name: str
+    given_name: Optional[str] = None
+    family_name: Optional[str] = None
+    picture: Optional[str] = None
+
+
+class AuthResponse(BaseModel):
+    """Response model for authentication."""
+    status: str = "success"
+    user: UserProfile
+    token: str
+
+
+class SessionCompleteRequest(BaseModel):
+    """Request model for completed focus session."""
+    focus_minutes: int = Field(..., ge=1)
+    break_minutes: int = Field(..., ge=1)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+@app.post("/auth/google", response_model=AuthResponse, tags=["Auth"])
+async def auth_google(request: AuthRequest):
+    """Verify Google ID token and return user profile."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID."
+        )
+
+    try:
+        payload = id_token.verify_oauth2_token(
+            request.credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+    try:
+        upsert_user_in_supabase(payload)
+    except Exception as exc:
+        logger.exception("Failed to upsert user in Supabase")
+        raise HTTPException(status_code=500, detail="Failed to sync user")
+
+    user = UserProfile(
+        id=payload.get("sub", ""),
+        email=payload.get("email", ""),
+        name=payload.get("name", ""),
+        given_name=payload.get("given_name"),
+        family_name=payload.get("family_name"),
+        picture=payload.get("picture")
+    )
+
+    return AuthResponse(user=user, token=request.credential)
+
+
+@app.get("/me", response_model=UserProfile, tags=["Auth"])
+async def get_me(authorization: Optional[str] = Header(None)):
+    """Return the current user from the Google token and sync to Supabase."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = id_token.verify_oauth2_token(
+            token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        upsert_user_in_supabase(payload)
+    except Exception as exc:
+        logger.exception("Failed to upsert user in Supabase")
+        raise HTTPException(status_code=500, detail="Failed to sync user")
+
+    return UserProfile(
+        id=payload.get("sub", ""),
+        email=payload.get("email", ""),
+        name=payload.get("name", ""),
+        given_name=payload.get("given_name"),
+        family_name=payload.get("family_name"),
+        picture=payload.get("picture")
+    )
+
+
+@app.post("/sessions/complete", tags=["Sessions"])
+async def complete_session(
+    request: SessionCompleteRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Store a completed focus session for the authenticated user."""
+    client = get_supabase_client()
+    if not client:
+        raise HTTPException(status_code=500, detail="Supabase not configured")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = id_token.verify_oauth2_token(
+            token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        user_record = upsert_user_in_supabase(payload)
+    except Exception:
+        logger.exception("Failed to upsert user in Supabase")
+        raise HTTPException(status_code=500, detail="Unable to resolve user")
+
+    record = {
+        "user_id": user_record.get("id"),
+        "focus_minutes": request.focus_minutes,
+        "break_minutes": request.break_minutes,
+        "started_at": request.started_at,
+        "completed_at": request.completed_at or datetime.now()
+    }
+
+    client.table("sessions").insert(record).execute()
+    return {"status": "success"}
 
 
 @app.post("/video", response_model=VideoResult, tags=["Video"])

@@ -1,4 +1,4 @@
-# LockIn API Backend Documentation
+ LockIn API Backend Documentation
 
 ## Overview
 
@@ -15,7 +15,7 @@ The FastAPI backend exposes the multimodal ranking system through REST endpoints
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt 
 ```
 
 ### 2. Set Environment Variable

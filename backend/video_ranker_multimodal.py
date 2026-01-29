@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 # --- Configuration ---
 TEXT_MODEL_NAME = './my-finetuned-model'
 VISUAL_MODEL_NAME = 'clip-ViT-B-32'
-VIDEO_DATA_FILE = 'videos.csv'
 IMAGE_EMBEDDINGS_FILE = 'video_image_embeddings.npy'
 TEXT_WEIGHT = 0.7
 VISUAL_WEIGHT = 0.3

@@ -29,6 +29,14 @@ import uvicorn
 
 from playlist_ranker import PlaylistRanker
 
+# Load .env automatically for local development
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except Exception:
+    pass
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -134,7 +142,8 @@ def upsert_user_in_supabase(payload: dict) -> dict:
 async def startup_event():
     """Run on server startup."""
     logger.info("Server starting up...")
-    initialize_ranker()
+    if os.getenv("EAGER_LOAD_RANKER", "false").lower() == "true":
+        initialize_ranker()
     logger.info("Server ready to handle requests")
 
 
@@ -388,11 +397,12 @@ async def complete_session(
 async def get_video(request: VideoRequest):
     """Fetch metadata for a single YouTube video."""
     if not PLAYLIST_RANKER:
-        logger.error("PlaylistRanker not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="API not ready. YouTube API key may not be configured."
-        )
+        if not initialize_ranker():
+            logger.error("PlaylistRanker not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="API not ready. YouTube API key may not be configured."
+            )
 
     try:
         parser = PLAYLIST_RANKER.parser
@@ -485,11 +495,12 @@ async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTas
     
     # Validate API is ready
     if not PLAYLIST_RANKER:
-        logger.error("PlaylistRanker not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="API not ready. YouTube API key may not be configured."
-        )
+        if not initialize_ranker():
+            logger.error("PlaylistRanker not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="API not ready. YouTube API key may not be configured."
+            )
     
     try:
         logger.info(f"Ranking request: playlist={request.playlist_url[:50]}..., intent={request.user_intent}")

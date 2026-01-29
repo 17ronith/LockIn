@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = 'http://localhost:3001'
+const DEFAULT_BASE_URL = 'https://lockin-dev.vercel.app'
 const BUTTON_ID = 'lockin-floating-button'
 
 const createButton = () => {

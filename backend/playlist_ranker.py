@@ -20,6 +20,7 @@ from typing import List, Dict, Optional, Tuple
 from io import BytesIO
 import requests
 import logging
+import os
 from pathlib import Path
 
 from playlist_parser import PlaylistParser
@@ -29,8 +30,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-TEXT_MODEL_NAME = './my-finetuned-model'
-VISUAL_MODEL_NAME = 'clip-ViT-B-32'
+BASE_DIR = Path(__file__).parent
+LOCAL_TEXT_MODEL = BASE_DIR / "my-finetuned-model"
+TEXT_MODEL_NAME = os.getenv(
+    "TEXT_MODEL_NAME",
+    str(LOCAL_TEXT_MODEL) if LOCAL_TEXT_MODEL.exists() else "all-MiniLM-L6-v2"
+)
+VISUAL_MODEL_NAME = os.getenv("VISUAL_MODEL_NAME", "clip-ViT-B-32")
 TEXT_WEIGHT = 0.7
 VISUAL_WEIGHT = 0.3
 EXPECTED_EMBEDDING_DIM = 512  # CLIP embeddings dimension

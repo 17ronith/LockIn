@@ -57,7 +57,11 @@ app = FastAPI(
 # Allow frontend to make requests from any origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual frontend URL
+    allow_origins=[
+        "https://lockin-dev.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     expose_headers=["*"],

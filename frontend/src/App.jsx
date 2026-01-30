@@ -369,6 +369,31 @@ function App() {
   }, [authUser, isAuthRoute, location.pathname, navigate])
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const token = params.get('token')
+    const error = params.get('error')
+    if (!token && !error) return
+
+    if (error) {
+      setAuthError('Unable to sign in with Google. Please try again.')
+      navigate(location.pathname, { replace: true })
+      return
+    }
+
+    const user = decodeGoogleCredential(token)
+    if (user) {
+      setAuthUser(user)
+      setAuthToken(token)
+      localStorage.setItem('lockin_user', JSON.stringify(user))
+      localStorage.setItem('lockin_token', token)
+      navigate('/', { replace: true })
+    } else {
+      setAuthError('Unable to sign in with Google. Please try again.')
+      navigate(location.pathname, { replace: true })
+    }
+  }, [location.pathname, location.search, navigate])
+
+  useEffect(() => {
     if (externalLaunchHandledRef.current) return
     const params = new URLSearchParams(location.search)
     const incomingUrl = params.get('video') || params.get('url')

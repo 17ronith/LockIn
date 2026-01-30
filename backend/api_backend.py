@@ -18,8 +18,10 @@ import json
 from typing import List, Optional
 from datetime import datetime
 from functools import lru_cache
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Header
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from google.oauth2 import id_token
@@ -72,6 +74,9 @@ app.add_middleware(
 PLAYLIST_RANKER: Optional[PlaylistRanker] = None
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_OAUTH_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+FRONTEND_OAUTH_REDIRECT_URL = os.getenv("FRONTEND_OAUTH_REDIRECT_URL", "https://lockin-dev.vercel.app")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -286,6 +291,81 @@ class SessionCompleteRequest(BaseModel):
     break_minutes: int = Field(..., ge=1)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+@app.get("/auth/google", tags=["Auth"])
+async def auth_google_redirect():
+    """Start Google OAuth via redirect-based flow."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_OAUTH_REDIRECT_URI."
+        )
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url=url, status_code=302)
+
+
+@app.get("/auth/google/callback", tags=["Auth"])
+async def auth_google_callback(code: Optional[str] = None, error: Optional[str] = None):
+    """Handle Google OAuth redirect and exchange code for tokens."""
+    if error:
+        return RedirectResponse(url=f"{FRONTEND_OAUTH_REDIRECT_URL}/login?error={error}", status_code=302)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI."
+        )
+
+    token_response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        },
+        timeout=15,
+    )
+    if token_response.status_code != 200:
+        logger.error("Google token exchange failed: %s", token_response.text)
+        raise HTTPException(status_code=401, detail="Token exchange failed")
+
+    token_json = token_response.json()
+    id_token_value = token_json.get("id_token")
+    if not id_token_value:
+        raise HTTPException(status_code=401, detail="Missing id_token")
+
+    try:
+        payload = id_token.verify_oauth2_token(
+            id_token_value,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+    try:
+        upsert_user_in_supabase(payload)
+    except Exception:
+        logger.exception("Failed to upsert user in Supabase")
+        raise HTTPException(status_code=500, detail="Failed to sync user")
+
+    redirect_url = f"{FRONTEND_OAUTH_REDIRECT_URL}/login?token={id_token_value}"
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @app.post("/auth/google", response_model=AuthResponse, tags=["Auth"])

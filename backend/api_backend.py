@@ -30,6 +30,7 @@ from supabase import create_client, Client
 import uvicorn
 
 from playlist_ranker import PlaylistRanker
+from playlist_parser import PlaylistParser
 
 # Load .env automatically for local development
 try:
@@ -478,16 +479,14 @@ async def complete_session(
 @app.post("/video", response_model=VideoResult, tags=["Video"])
 async def get_video(request: VideoRequest):
     """Fetch metadata for a single YouTube video."""
-    if not PLAYLIST_RANKER:
-        if not initialize_ranker():
-            logger.error("PlaylistRanker not initialized")
-            raise HTTPException(
-                status_code=503,
-                detail="API not ready. YouTube API key may not be configured."
-            )
+    if not YOUTUBE_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="API not ready. YouTube API key may not be configured."
+        )
 
     try:
-        parser = PLAYLIST_RANKER.parser
+        parser = PlaylistParser(api_key=YOUTUBE_API_KEY)
         video_id = parser._get_video_id_from_url(request.video_url)
         details = parser.fetch_video_details(video_id, use_cache=True)
 

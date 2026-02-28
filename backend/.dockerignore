@@ -1,0 +1,30 @@
+# Large model files (fallback to all-MiniLM-L6-v2 on cloud)
+my-finetuned-model/
+checkpoints/
+
+# Cached/generated data
+images/
+cache/
+video_image_embeddings.npy
+ranked_results.csv
+videos.csv
+finetune_data.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Dev/docs
+*.md
+.env
+.DS_Store
+
+# Training scripts (not needed at runtime)
+finetune_mnr.py
+finetune_triple
+preprocess_images.py
+video_ranker.py
+video_ranker_multimodal.py

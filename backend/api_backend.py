@@ -361,8 +361,7 @@ async def auth_google_callback(code: Optional[str] = None, error: Optional[str] 
     try:
         upsert_user_in_supabase(payload)
     except Exception:
-        logger.exception("Failed to upsert user in Supabase")
-        raise HTTPException(status_code=500, detail="Failed to sync user")
+        logger.exception("Failed to upsert user in Supabase (non-fatal, continuing login)")
 
     redirect_url = f"{FRONTEND_OAUTH_REDIRECT_URL}/login?token={id_token_value}"
     return RedirectResponse(url=redirect_url, status_code=302)
@@ -389,8 +388,7 @@ async def auth_google(request: AuthRequest):
     try:
         upsert_user_in_supabase(payload)
     except Exception as exc:
-        logger.exception("Failed to upsert user in Supabase")
-        raise HTTPException(status_code=500, detail="Failed to sync user")
+        logger.exception("Failed to upsert user in Supabase (non-fatal, continuing login)")
 
     user = UserProfile(
         id=payload.get("sub", ""),

@@ -15,12 +15,15 @@ import os
 import logging
 import base64
 import json
-from typing import List, Optional
+import hmac
+import hashlib
+import time
+from typing import List, Optional, Dict
 from datetime import datetime
 from functools import lru_cache
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Header
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Header, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
@@ -28,6 +31,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from supabase import create_client, Client
 import uvicorn
+import razorpay
 
 from playlist_ranker import PlaylistRanker
 from playlist_parser import PlaylistParser
@@ -80,6 +84,18 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 FRONTEND_OAUTH_REDIRECT_URL = os.getenv("FRONTEND_OAUTH_REDIRECT_URL", "https://lockin-dev.vercel.app")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID") or os.getenv("razorpay_key_id")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET") or os.getenv("razorpay_key_secret")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
+
+VIDEO_CREDIT_COST = 2
+PLAYLIST_CREDIT_COST = 8
+STARTER_CREDITS = 30
+DEFAULT_CREDIT_PACKS = {
+    "small": {"credits": 40, "amount_paise": 4900, "label": "40 credits"},
+    "medium": {"credits": 100, "amount_paise": 9900, "label": "100 credits"},
+    "large": {"credits": 250, "amount_paise": 19900, "label": "250 credits"}
+}
 
 
 def initialize_ranker():
@@ -121,6 +137,72 @@ def get_supabase_client() -> Optional[Client]:
     if payload and payload.get("role") != "service_role":
         logger.warning("Supabase key is not a service role key. Writes may be blocked by RLS.")
     return client
+
+
+def get_razorpay_client() -> razorpay.Client:
+    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+        raise RuntimeError("Razorpay keys not configured")
+    return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
+
+def get_authenticated_payload(authorization: Optional[str]) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = id_token.verify_oauth2_token(
+            token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+        return payload
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+
+def get_user_credits(google_sub: str) -> Optional[int]:
+    client = get_supabase_client()
+    if not client:
+        raise RuntimeError("Supabase client not configured")
+
+    result = client.table("users").select("credits").eq("google_sub", google_sub).limit(1).execute()
+    if not result.data:
+        return None
+    return result.data[0].get("credits")
+
+
+def ensure_user_credits(google_sub: str) -> int:
+    client = get_supabase_client()
+    if not client:
+        raise RuntimeError("Supabase client not configured")
+
+    result = client.table("users").select("credits").eq("google_sub", google_sub).limit(1).execute()
+    if not result.data:
+        raise RuntimeError("User not found")
+
+    credits = result.data[0].get("credits")
+    if credits is None:
+        credits = STARTER_CREDITS
+        client.table("users").update({"credits": credits}).eq("google_sub", google_sub).execute()
+    return credits
+
+
+def add_user_credits(google_sub: str, credits_to_add: int) -> int:
+    client = get_supabase_client()
+    if not client:
+        raise RuntimeError("Supabase client not configured")
+
+    result = client.table("users").select("credits").eq("google_sub", google_sub).limit(1).execute()
+    if not result.data:
+        raise RuntimeError("User not found")
+
+    current = result.data[0].get("credits")
+    if current is None:
+        current = STARTER_CREDITS
+
+    new_total = int(current) + int(credits_to_add)
+    client.table("users").update({"credits": new_total}).eq("google_sub", google_sub).execute()
+    return new_total
 
 
 def upsert_user_in_supabase(payload: dict) -> dict:
@@ -286,6 +368,61 @@ class AuthResponse(BaseModel):
     token: str
 
 
+class BillingPack(BaseModel):
+    pack_id: str
+    credits: int
+    amount_paise: int
+    currency: str = "INR"
+    label: str
+
+
+class BillingConfigResponse(BaseModel):
+    key_id: str
+    currency: str
+    packs: List[BillingPack]
+    video_credit_cost: int
+    playlist_credit_cost: int
+
+
+class CreateOrderRequest(BaseModel):
+    pack_id: str
+
+
+class CreateOrderResponse(BaseModel):
+    order_id: str
+    amount: int
+    currency: str
+    key_id: str
+    pack: BillingPack
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+class CreditsResponse(BaseModel):
+    credits: int
+
+
+def get_credit_pack(pack_id: str) -> BillingPack:
+    pack = DEFAULT_CREDIT_PACKS.get(pack_id)
+    if not pack:
+        raise HTTPException(status_code=400, detail="Invalid credit pack")
+    return BillingPack(
+        pack_id=pack_id,
+        credits=pack["credits"],
+        amount_paise=pack["amount_paise"],
+        currency="INR",
+        label=pack["label"]
+    )
+
+
+def list_credit_packs() -> List[BillingPack]:
+    return [get_credit_pack(pack_id) for pack_id in DEFAULT_CREDIT_PACKS]
+
+
 class SessionCompleteRequest(BaseModel):
     """Request model for completed focus session."""
     focus_minutes: int = Field(..., ge=1)
@@ -433,6 +570,144 @@ async def get_me(authorization: Optional[str] = Header(None)):
         family_name=payload.get("family_name"),
         picture=payload.get("picture")
     )
+
+
+@app.get("/billing/config", response_model=BillingConfigResponse, tags=["Billing"])
+async def get_billing_config():
+    if not RAZORPAY_KEY_ID:
+        raise HTTPException(status_code=500, detail="Razorpay key not configured")
+
+    return BillingConfigResponse(
+        key_id=RAZORPAY_KEY_ID,
+        currency="INR",
+        packs=list_credit_packs(),
+        video_credit_cost=VIDEO_CREDIT_COST,
+        playlist_credit_cost=PLAYLIST_CREDIT_COST
+    )
+
+
+@app.get("/billing/credits", response_model=CreditsResponse, tags=["Billing"])
+async def get_credits(authorization: Optional[str] = Header(None)):
+    payload = get_authenticated_payload(authorization)
+    google_sub = payload.get("sub")
+    if not google_sub:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    try:
+        credits = ensure_user_credits(google_sub)
+    except Exception as exc:
+        logger.exception("Failed to load credits")
+        raise HTTPException(status_code=500, detail="Unable to load credits")
+
+    return CreditsResponse(credits=credits)
+
+
+@app.post("/billing/create-order", response_model=CreateOrderResponse, tags=["Billing"])
+async def create_order(request: CreateOrderRequest, authorization: Optional[str] = Header(None)):
+    payload = get_authenticated_payload(authorization)
+    google_sub = payload.get("sub")
+    if not google_sub:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    pack = get_credit_pack(request.pack_id)
+    client = get_razorpay_client()
+
+    try:
+        order = client.order.create({
+            "amount": pack.amount_paise,
+            "currency": pack.currency,
+            "receipt": f"lockin_{google_sub}_{int(time.time())}",
+            "notes": {
+                "user_id": google_sub,
+                "pack_id": pack.pack_id
+            }
+        })
+    except Exception as exc:
+        logger.exception("Failed to create Razorpay order")
+        raise HTTPException(status_code=500, detail="Unable to create order")
+
+    return CreateOrderResponse(
+        order_id=order.get("id"),
+        amount=order.get("amount"),
+        currency=order.get("currency"),
+        key_id=RAZORPAY_KEY_ID,
+        pack=pack
+    )
+
+
+@app.post("/billing/verify-payment", response_model=CreditsResponse, tags=["Billing"])
+async def verify_payment(request: VerifyPaymentRequest, authorization: Optional[str] = Header(None)):
+    payload = get_authenticated_payload(authorization)
+    google_sub = payload.get("sub")
+    if not google_sub:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    client = get_razorpay_client()
+    try:
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": request.razorpay_order_id,
+            "razorpay_payment_id": request.razorpay_payment_id,
+            "razorpay_signature": request.razorpay_signature
+        })
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+
+    order = client.order.fetch(request.razorpay_order_id)
+    notes = order.get("notes", {}) or {}
+    if notes.get("user_id") != google_sub:
+        raise HTTPException(status_code=403, detail="Order does not belong to user")
+
+    pack_id = notes.get("pack_id")
+    pack = get_credit_pack(pack_id)
+    if order.get("amount") != pack.amount_paise:
+        raise HTTPException(status_code=400, detail="Order amount mismatch")
+
+    try:
+        new_total = add_user_credits(google_sub, pack.credits)
+    except Exception:
+        logger.exception("Failed to add credits")
+        raise HTTPException(status_code=500, detail="Failed to add credits")
+
+    return CreditsResponse(credits=new_total)
+
+
+@app.post("/billing/webhook", tags=["Billing"])
+async def razorpay_webhook(request: Request):
+    if not RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+
+    signature = request.headers.get("X-Razorpay-Signature") or request.headers.get("x-razorpay-signature")
+    if not signature:
+        raise HTTPException(status_code=400, detail="Missing webhook signature")
+
+    body = await request.body()
+    expected = hmac.new(
+        RAZORPAY_WEBHOOK_SECRET.encode("utf-8"),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    payload = json.loads(body.decode("utf-8"))
+    event = payload.get("event")
+
+    if event in {"payment.captured", "order.paid"}:
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        order_entity = payload.get("payload", {}).get("order", {}).get("entity", {})
+        notes = payment_entity.get("notes") or order_entity.get("notes") or {}
+        google_sub = notes.get("user_id")
+        pack_id = notes.get("pack_id")
+
+        if google_sub and pack_id:
+            try:
+                pack = get_credit_pack(pack_id)
+                add_user_credits(google_sub, pack.credits)
+            except Exception:
+                logger.exception("Failed to add credits from webhook")
+                raise HTTPException(status_code=500, detail="Failed to process webhook")
+
+    return {"status": "ok"}
 
 
 @app.post("/sessions/complete", tags=["Sessions"])

@@ -23,3 +23,6 @@ google-auth>=2.22.0
 
 # Supabase
 supabase>=2.4.0
+
+# Payments
+razorpay>=1.4.2

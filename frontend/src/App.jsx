@@ -89,6 +89,11 @@ function App() {
   })
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('lockin_token') || '')
   const [authError, setAuthError] = useState('')
+  const [credits, setCredits] = useState(null)
+  const [billingConfig, setBillingConfig] = useState(null)
+  const [billingError, setBillingError] = useState('')
+  const [billingLoading, setBillingLoading] = useState(false)
+  const [showBilling, setShowBilling] = useState(false)
 
   const loadingTips = [
     'Breathe in — breathe out.',
@@ -101,6 +106,7 @@ function App() {
   const playerTimestampRef = useRef(Date.now())
   const userMenuRef = useRef(null)
   const externalLaunchHandledRef = useRef(false)
+  const razorpayScriptPromiseRef = useRef(null)
   const location = useLocation()
   const navigate = useNavigate()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
@@ -308,6 +314,107 @@ function App() {
     navigate('/')
   }
 
+  const loadRazorpayScript = () => {
+    if (window.Razorpay) return Promise.resolve(true)
+    if (razorpayScriptPromiseRef.current) return razorpayScriptPromiseRef.current
+
+    razorpayScriptPromiseRef.current = new Promise((resolve) => {
+      const script = document.createElement('script')
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+      script.async = true
+      script.onload = () => resolve(true)
+      script.onerror = () => resolve(false)
+      document.body.appendChild(script)
+    })
+
+    return razorpayScriptPromiseRef.current
+  }
+
+  const fetchBillingData = useCallback(async () => {
+    if (!authUser || !authToken) return
+
+    try {
+      const [configResponse, creditsResponse] = await Promise.all([
+        axios.get(`${API_URL}/billing/config`),
+        axios.get(`${API_URL}/billing/credits`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        })
+      ])
+      setBillingConfig(configResponse.data)
+      setCredits(creditsResponse.data.credits)
+    } catch (err) {
+      console.error('Billing fetch error:', err)
+    }
+  }, [authUser, authToken])
+
+  const handleOpenBilling = () => {
+    setBillingError('')
+    setShowBilling(true)
+  }
+
+  const handlePurchase = async (packId) => {
+    if (!billingConfig || !authToken) return
+    setBillingLoading(true)
+    setBillingError('')
+
+    try {
+      const orderResponse = await axios.post(
+        `${API_URL}/billing/create-order`,
+        { pack_id: packId },
+        { headers: { Authorization: `Bearer ${authToken}` } }
+      )
+
+      const { order_id, amount, currency, key_id, pack } = orderResponse.data
+      const ready = await loadRazorpayScript()
+      if (!ready) {
+        throw new Error('Unable to load Razorpay checkout')
+      }
+
+      const options = {
+        key: key_id,
+        amount,
+        currency,
+        name: 'LockIn',
+        description: pack?.label || 'Credits pack',
+        order_id,
+        prefill: {
+          name: authUser?.name || authUser?.given_name || '',
+          email: authUser?.email || ''
+        },
+        handler: async (response) => {
+          try {
+            const verifyResponse = await axios.post(
+              `${API_URL}/billing/verify-payment`,
+              {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature
+              },
+              { headers: { Authorization: `Bearer ${authToken}` } }
+            )
+            setCredits(verifyResponse.data.credits)
+            setShowBilling(false)
+          } catch (verifyErr) {
+            console.error('Verify payment error:', verifyErr)
+            setBillingError('Payment verified, but credits did not update. Contact support.')
+          } finally {
+            setBillingLoading(false)
+          }
+        },
+        modal: {
+          ondismiss: () => setBillingLoading(false)
+        }
+      }
+
+      const paymentObject = new window.Razorpay(options)
+      paymentObject.open()
+    } catch (err) {
+      console.error('Purchase error:', err)
+      setBillingError(err.message || 'Unable to start checkout')
+      setBillingLoading(false)
+    }
+  }
+
   const handleHome = () => {
     if (location.pathname === '/results' && selectedVideo) {
       requestExit('__reset__')
@@ -392,6 +499,14 @@ function App() {
       navigate(location.pathname, { replace: true })
     }
   }, [location.pathname, location.search, navigate])
+
+  useEffect(() => {
+    if (!authUser || !authToken) {
+      setCredits(null)
+      return
+    }
+    fetchBillingData()
+  }, [authUser, authToken, fetchBillingData])
 
   useEffect(() => {
     if (externalLaunchHandledRef.current) return
@@ -850,43 +965,98 @@ function App() {
         </div>
       )}
 
+      {showBilling && (
+        <div className="billing-overlay">
+          <div className="billing-modal">
+            <div className="billing-header">
+              <div>
+                <h3>Buy credits</h3>
+                <p>8 credits per playlist, 2 credits per video.</p>
+              </div>
+              <button className="billing-close" onClick={() => setShowBilling(false)}>
+                ✕
+              </button>
+            </div>
+            {!billingConfig && (
+              <div className="billing-loading">Loading packs...</div>
+            )}
+            {billingConfig && (
+              <div className="billing-packs">
+                {billingConfig.packs.map((pack) => (
+                  <div className="billing-pack" key={pack.pack_id}>
+                    <div className="billing-pack-info">
+                      <div className="billing-pack-title">{pack.label}</div>
+                      <div className="billing-pack-subtitle">{pack.credits} credits</div>
+                    </div>
+                    <div className="billing-pack-right">
+                      <div className="billing-pack-price">INR {(pack.amount_paise / 100).toFixed(0)}</div>
+                      <button
+                        className="billing-pack-btn"
+                        type="button"
+                        disabled={billingLoading}
+                        onClick={() => handlePurchase(pack.pack_id)}
+                      >
+                        {billingLoading ? 'Starting...' : 'Buy'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {billingError && <div className="error-message">{billingError}</div>}
+            {credits !== null && (
+              <div className="billing-footer">Current balance: {credits} credits</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Navigation */}
       <nav className="navbar">
         <div className="navbar-content">
           <button className="navbar-brand" onClick={handleHome}>LockIn</button>
           {authUser ? (
-            <div className="navbar-user" ref={userMenuRef}>
-              <button
-                className="user-trigger"
-                onClick={() => setShowUserMenu((prev) => !prev)}
-                aria-haspopup="menu"
-                aria-expanded={showUserMenu}
-              >
-                {authUser.picture ? (
-                  <img
-                    src={authUser.picture}
-                    alt=""
-                    className="user-avatar"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span className="user-avatar-fallback">
-                    {(authUser.given_name || authUser.name || 'U').charAt(0)}
-                  </span>
+            <div className="navbar-user-wrap">
+              <div className="navbar-credits">
+                <span className="credits-label">Credits</span>
+                <span className="credits-value">{credits === null ? '—' : credits}</span>
+                <button className="credits-buy" type="button" onClick={handleOpenBilling}>
+                  Buy credits
+                </button>
+              </div>
+              <div className="navbar-user" ref={userMenuRef}>
+                <button
+                  className="user-trigger"
+                  onClick={() => setShowUserMenu((prev) => !prev)}
+                  aria-haspopup="menu"
+                  aria-expanded={showUserMenu}
+                >
+                  {authUser.picture ? (
+                    <img
+                      src={authUser.picture}
+                      alt=""
+                      className="user-avatar"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="user-avatar-fallback">
+                      {(authUser.given_name || authUser.name || 'U').charAt(0)}
+                    </span>
+                  )}
+                  {authUser.given_name || authUser.name || 'Account'}
+                  <span className="user-caret">⌄</span>
+                </button>
+                {showUserMenu && (
+                  <div className="user-menu" role="menu">
+                    <button className="user-menu-item" type="button" disabled>
+                      Settings
+                    </button>
+                    <button className="user-menu-item" type="button" onClick={handleLogout}>
+                      Log out
+                    </button>
+                  </div>
                 )}
-                {authUser.given_name || authUser.name || 'Account'}
-                <span className="user-caret">⌄</span>
-              </button>
-              {showUserMenu && (
-                <div className="user-menu" role="menu">
-                  <button className="user-menu-item" type="button" disabled>
-                    Settings
-                  </button>
-                  <button className="user-menu-item" type="button" onClick={handleLogout}>
-                    Log out
-                  </button>
-                </div>
-              )}
+              </div>
             </div>
           ) : (
             <div className="navbar-auth">

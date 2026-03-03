@@ -11,10 +11,15 @@ import llamaIcon from './assets/LLaMA Model Icon.png'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const FALLBACK_PACKS = [
-  { pack_id: 'small',  label: '40 credits',  credits: 40,  amount_paise: 4900,  currency: 'INR' },
-  { pack_id: 'medium', label: '100 credits', credits: 100, amount_paise: 9900,  currency: 'INR' },
-  { pack_id: 'large',  label: '250 credits', credits: 250, amount_paise: 19900, currency: 'INR' },
+  { pack_id: 'small',  label: 'Starter',  credits: 40,  amount_paise: 4900,  currency: 'INR' },
+  { pack_id: 'medium', label: 'Focus',    credits: 100, amount_paise: 9900,  currency: 'INR' },
+  { pack_id: 'large',  label: 'Deep Work',credits: 250, amount_paise: 19900, currency: 'INR' },
 ]
+const PACK_META = {
+  small:  { badge: null,            tagline: '5 playlists  ·  20 videos',  perCredit: '₹1.23' },
+  medium: { badge: 'Most Popular',  tagline: '12 playlists  ·  50 videos', perCredit: '₹0.99' },
+  large:  { badge: 'Best Value',    tagline: '31 playlists  ·  125 videos',perCredit: '₹0.80' },
+}
 const EXIT_PHRASE = "I don't want to achieve my goals"
 const DEFAULT_FOCUS_MINUTES = 25
 const DEFAULT_BREAK_MINUTES = 5
@@ -992,51 +997,105 @@ function App() {
         </div>
       )}
 
-      {showBilling && (
-        <div className="billing-overlay">
-          <div className="billing-modal">
-            <div className="billing-header">
-              <div>
-                <h3>Buy credits</h3>
-                <p>8 credits per playlist, 2 credits per video.</p>
+      <AnimatePresence>
+        {showBilling && (
+          <motion.div
+            className="billing-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowBilling(false) }}
+          >
+            <motion.div
+              className="billing-modal"
+              initial={{ opacity: 0, scale: 0.94, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 14 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            >
+              {/* Header */}
+              <div className="billing-header">
+                <div>
+                  <h3>Upgrade your focus</h3>
+                  <p>Credits never expire — use them at your own pace.</p>
+                </div>
+                <button className="billing-close" onClick={() => setShowBilling(false)} aria-label="Close">✕</button>
               </div>
-              <button className="billing-close" onClick={() => setShowBilling(false)}>
-                ✕
-              </button>
-            </div>
-            {billingConfigLoading && (
-              <div className="billing-loading">Loading packs...</div>
-            )}
-            {!billingConfigLoading && (
-              <div className="billing-packs">
-                {(billingConfig?.packs || FALLBACK_PACKS).map((pack) => (
-                  <div className="billing-pack" key={pack.pack_id}>
-                    <div className="billing-pack-info">
-                      <div className="billing-pack-title">{pack.label}</div>
-                      <div className="billing-pack-subtitle">{pack.credits} credits</div>
-                    </div>
-                    <div className="billing-pack-right">
-                      <div className="billing-pack-price">₹{(pack.amount_paise / 100).toFixed(0)}</div>
-                      <button
-                        className="billing-pack-btn"
-                        type="button"
-                        disabled={billingLoading}
-                        onClick={() => handlePurchase(pack.pack_id)}
+
+              {/* Balance strip */}
+              {credits !== null && (
+                <div className="billing-balance-strip">
+                  <span className="billing-balance-icon">◎</span>
+                  <span className="billing-balance-text">You have <strong>{credits} credits</strong> remaining</span>
+                </div>
+              )}
+
+              {/* Packs */}
+              {billingConfigLoading ? (
+                <div className="billing-loading">
+                  <span className="billing-spinner" />
+                  Loading packs…
+                </div>
+              ) : (
+                <div className="billing-packs">
+                  {(billingConfig?.packs || FALLBACK_PACKS).map((pack, i) => {
+                    const meta = PACK_META[pack.pack_id] || {}
+                    const isPopular = meta.badge === 'Most Popular'
+                    const isBest = meta.badge === 'Best Value'
+                    return (
+                      <motion.div
+                        className={`billing-pack${isPopular ? ' billing-pack-popular' : ''}${isBest ? ' billing-pack-best' : ''}`}
+                        key={pack.pack_id}
+                        initial={{ opacity: 0, y: 14 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.07, type: 'spring', stiffness: 260, damping: 24 }}
+                        whileHover={{ y: -2, transition: { duration: 0.15 } }}
                       >
-                        {billingLoading ? 'Starting...' : 'Buy'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                        {meta.badge && (
+                          <span className={`billing-pack-badge${isPopular ? ' badge-popular' : ' badge-best'}`}>
+                            {meta.badge}
+                          </span>
+                        )}
+                        <div className="billing-pack-left">
+                          <div className="billing-pack-name">{pack.label || pack.credits + ' credits'}</div>
+                          <div className="billing-pack-credits-count">{pack.credits} credits</div>
+                          <div className="billing-pack-tagline">{meta.tagline}</div>
+                        </div>
+                        <div className="billing-pack-right">
+                          <div className="billing-pack-pricing">
+                            <div className="billing-pack-price">₹{(pack.amount_paise / 100).toFixed(0)}</div>
+                            {meta.perCredit && <div className="billing-pack-per">{meta.perCredit} / credit</div>}
+                          </div>
+                          <button
+                            className={`billing-pack-btn${isPopular ? ' billing-pack-btn-glow' : ''}`}
+                            type="button"
+                            disabled={billingLoading}
+                            onClick={() => handlePurchase(pack.pack_id)}
+                          >
+                            {billingLoading ? '…' : 'Get'}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {billingError && <div className="billing-error-msg">{billingError}</div>}
+
+              {/* Trust row */}
+              <div className="billing-trust">
+                <span><span className="trust-icon">🔒</span> Razorpay secured</span>
+                <span className="trust-divider" />
+                <span><span className="trust-icon">⚡</span> Instant credits</span>
+                <span className="trust-divider" />
+                <span><span className="trust-icon">✦</span> No subscription</span>
               </div>
-            )}
-            {billingError && <div className="error-message">{billingError}</div>}
-            {credits !== null && (
-              <div className="billing-footer">Current balance: {credits} credits</div>
-            )}
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Navigation */}
       <nav className="navbar">

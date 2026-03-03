@@ -854,40 +854,58 @@ function App() {
       <nav className="navbar">
         <div className="navbar-content">
           <button className="navbar-brand" onClick={handleHome}>LockIn</button>
-          <div className="navbar-user" ref={userMenuRef}>
-            <button
-              className="user-trigger"
-              onClick={() => setShowUserMenu((prev) => !prev)}
-              aria-haspopup="menu"
-              aria-expanded={showUserMenu}
-            >
-              {authUser?.given_name || authUser?.name || 'Account'}
-              <span className="user-caret">⌄</span>
-            </button>
-            {showUserMenu && (
-              <div className="user-menu" role="menu">
-                {authUser ? (
-                  <>
-                    <button className="user-menu-item" type="button" disabled>
-                      Settings
-                    </button>
-                    <button className="user-menu-item" type="button" onClick={handleLogout}>
-                      Log out
-                    </button>
-                  </>
+          {authUser ? (
+            <div className="navbar-user" ref={userMenuRef}>
+              <button
+                className="user-trigger"
+                onClick={() => setShowUserMenu((prev) => !prev)}
+                aria-haspopup="menu"
+                aria-expanded={showUserMenu}
+              >
+                {authUser.picture ? (
+                  <img
+                    src={authUser.picture}
+                    alt=""
+                    className="user-avatar"
+                    referrerPolicy="no-referrer"
+                  />
                 ) : (
-                  <>
-                    <button className="user-menu-item" type="button" onClick={() => navigate('/login')}>
-                      Log in
-                    </button>
-                    <button className="user-menu-item" type="button" onClick={() => navigate('/signup')}>
-                      Sign up
-                    </button>
-                  </>
+                  <span className="user-avatar-fallback">
+                    {(authUser.given_name || authUser.name || 'U').charAt(0)}
+                  </span>
                 )}
-              </div>
-            )}
-          </div>
+                {authUser.given_name || authUser.name || 'Account'}
+                <span className="user-caret">⌄</span>
+              </button>
+              {showUserMenu && (
+                <div className="user-menu" role="menu">
+                  <button className="user-menu-item" type="button" disabled>
+                    Settings
+                  </button>
+                  <button className="user-menu-item" type="button" onClick={handleLogout}>
+                    Log out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="navbar-auth">
+              <button
+                className="nav-auth-link"
+                type="button"
+                onClick={() => navigate('/login')}
+              >
+                Sign in
+              </button>
+              <button
+                className="nav-auth-btn"
+                type="button"
+                onClick={() => navigate('/signup')}
+              >
+                Get started
+              </button>
+            </div>
+          )}
         </div>
       </nav>
 

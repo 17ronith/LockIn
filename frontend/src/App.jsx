@@ -10,6 +10,11 @@ import openaiIcon from './assets/OpenAI Logo Icon 50.png'
 import llamaIcon from './assets/LLaMA Model Icon.png'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const FALLBACK_PACKS = [
+  { pack_id: 'small',  label: '40 credits',  credits: 40,  amount_paise: 4900,  currency: 'INR' },
+  { pack_id: 'medium', label: '100 credits', credits: 100, amount_paise: 9900,  currency: 'INR' },
+  { pack_id: 'large',  label: '250 credits', credits: 250, amount_paise: 19900, currency: 'INR' },
+]
 const EXIT_PHRASE = "I don't want to achieve my goals"
 const DEFAULT_FOCUS_MINUTES = 25
 const DEFAULT_BREAK_MINUTES = 5
@@ -336,30 +341,34 @@ function App() {
   const fetchBillingData = useCallback(async () => {
     if (!authUser || !authToken) return
 
+    // Fetch credits and config independently so one failure doesn't block the other
     setCreditsLoading(true)
     setBillingConfigLoading(true)
     setBillingConfigError('')
 
-    try {
-      const [configResponse, creditsResponse] = await Promise.all([
-        axios.get(`${API_URL}/billing/config`, { timeout: 10000 }),
-        axios.get(`${API_URL}/billing/credits`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-          timeout: 10000
-        })
-      ])
-      setBillingConfig(configResponse.data)
-      setCredits(creditsResponse.data.credits)
-    } catch (err) {
-      console.error('Billing fetch error:', err)
-      if (!billingConfig) {
-        setBillingConfigError('Unable to load credit packs. Please try again.')
-      }
-    } finally {
-      setCreditsLoading(false)
-      setBillingConfigLoading(false)
-    }
-  }, [authUser, authToken, billingConfig])
+    // Credits
+    axios.get(`${API_URL}/billing/credits`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      timeout: 10000
+    })
+      .then(res => setCredits(res.data.credits))
+      .catch(err => console.error('Credits fetch error:', err))
+      .finally(() => setCreditsLoading(false))
+
+    // Config (packs + key_id)
+    axios.get(`${API_URL}/billing/config`, { timeout: 10000 })
+      .then(res => {
+        setBillingConfig(res.data)
+        setBillingConfigError('')
+      })
+      .catch(err => {
+        console.error('Billing config error:', err)
+        setBillingConfigError('Using offline pack list — live pricing may differ.')
+        // Still populate with fallback so packs render
+        setBillingConfig(prev => prev || { packs: FALLBACK_PACKS, key_id: null, currency: 'INR', video_credit_cost: 2, playlist_credit_cost: 8 })
+      })
+      .finally(() => setBillingConfigLoading(false))
+  }, [authUser, authToken])
 
   const handleOpenBilling = () => {
     setBillingError('')
@@ -369,7 +378,9 @@ function App() {
   }
 
   const handlePurchase = async (packId) => {
-    if (!billingConfig || !authToken) return
+    if (!authToken) return
+    const packs = billingConfig?.packs || FALLBACK_PACKS
+    if (!packs.length) return
     setBillingLoading(true)
     setBillingError('')
 
@@ -996,24 +1007,16 @@ function App() {
             {billingConfigLoading && (
               <div className="billing-loading">Loading packs...</div>
             )}
-            {!billingConfigLoading && billingConfigError && (
-              <div className="billing-error">
-                <span>{billingConfigError}</span>
-                <button className="billing-retry" type="button" onClick={fetchBillingData}>
-                  Retry
-                </button>
-              </div>
-            )}
-            {!billingConfigLoading && billingConfig && (
+            {!billingConfigLoading && (
               <div className="billing-packs">
-                {billingConfig.packs.map((pack) => (
+                {(billingConfig?.packs || FALLBACK_PACKS).map((pack) => (
                   <div className="billing-pack" key={pack.pack_id}>
                     <div className="billing-pack-info">
                       <div className="billing-pack-title">{pack.label}</div>
                       <div className="billing-pack-subtitle">{pack.credits} credits</div>
                     </div>
                     <div className="billing-pack-right">
-                      <div className="billing-pack-price">INR {(pack.amount_paise / 100).toFixed(0)}</div>
+                      <div className="billing-pack-price">₹{(pack.amount_paise / 100).toFixed(0)}</div>
                       <button
                         className="billing-pack-btn"
                         type="button"

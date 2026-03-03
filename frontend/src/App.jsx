@@ -216,6 +216,8 @@ function App() {
     setError('')
     setLoading(true)
 
+    const authHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+
     try {
       if (isPlaylistUrl(trimmedUrl)) {
         if (!trimmedIntent) {
@@ -227,13 +229,15 @@ function App() {
           user_intent: trimmedIntent,
           limit: 9,
           min_score: 0.0,
-        })
+        }, { headers: authHeaders })
         setResults(response.data)
+        if (response.data.credits_remaining != null) setCredits(response.data.credits_remaining)
       } else if (isVideoUrl(trimmedUrl)) {
         const response = await axios.post(`${API_URL}/video`, {
           video_url: trimmedUrl,
-        })
+        }, { headers: authHeaders })
         const video = response.data
+        if (video.credits_remaining != null) setCredits(video.credits_remaining)
         setResults({
           status: 'success',
           timestamp: new Date().toISOString(),
@@ -258,7 +262,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [isPlaylistUrl, isVideoUrl])
+  }, [isPlaylistUrl, isVideoUrl, authToken])
 
   const handleGoogleCredential = useCallback(async (credential) => {
     if (!credential) return

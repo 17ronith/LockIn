@@ -205,6 +205,33 @@ def add_user_credits(google_sub: str, credits_to_add: int) -> int:
     return new_total
 
 
+def deduct_user_credits(google_sub: str, amount: int) -> int:
+    """Deduct credits from user. Raises HTTPException if insufficient."""
+    client = get_supabase_client()
+    if not client:
+        raise RuntimeError("Supabase client not configured")
+
+    result = client.table("users").select("credits").eq("google_sub", google_sub).limit(1).execute()
+    if not result.data:
+        raise RuntimeError("User not found")
+
+    current = result.data[0].get("credits")
+    if current is None:
+        current = STARTER_CREDITS
+    current = int(current)
+
+    if current < amount:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits. Need {amount}, have {current}."
+        )
+
+    new_total = current - amount
+    client.table("users").update({"credits": new_total}).eq("google_sub", google_sub).execute()
+    return new_total
+
+
 def upsert_user_in_supabase(payload: dict) -> dict:
     client = get_supabase_client()
     if not client:
@@ -316,6 +343,7 @@ class VideoResult(BaseModel):
     thumbnail_url_max: Optional[str]
     youtube_url: str
     published_at: Optional[str]
+    credits_remaining: Optional[int] = None
 
 
 class RankingResponse(BaseModel):
@@ -327,6 +355,7 @@ class RankingResponse(BaseModel):
     total_videos: int = Field(description="Total videos in playlist")
     returned_results: int = Field(description="Number of results returned after filtering")
     videos: List[VideoResult] = Field(description="List of ranked videos")
+    credits_remaining: Optional[int] = None
 
 
 class HealthResponse(BaseModel):
@@ -752,7 +781,7 @@ async def complete_session(
 
 
 @app.post("/video", response_model=VideoResult, tags=["Video"])
-async def get_video(request: VideoRequest):
+async def get_video(request: VideoRequest, authorization: Optional[str] = Header(None)):
     """Fetch metadata for a single YouTube video."""
     if not YOUTUBE_API_KEY:
         raise HTTPException(
@@ -774,6 +803,19 @@ async def get_video(request: VideoRequest):
         thumbnail_url_hq = parser.get_thumbnail_url(video_id, quality="hqdefault")
         thumbnail_url_max = parser.get_thumbnail_url(video_id, quality="maxresdefault")
 
+        # Deduct credits if user is authenticated
+        credits_remaining = None
+        if authorization and authorization.startswith("Bearer "):
+            try:
+                payload = get_authenticated_payload(authorization)
+                google_sub = payload.get("sub")
+                if google_sub:
+                    credits_remaining = deduct_user_credits(google_sub, VIDEO_CREDIT_COST)
+            except HTTPException:
+                raise
+            except Exception:
+                logger.warning("Credit deduction failed for video lookup")
+
         return VideoResult(
             rank=1,
             video_id=video_id,
@@ -786,7 +828,8 @@ async def get_video(request: VideoRequest):
             thumbnail_url_hq=thumbnail_url_hq,
             thumbnail_url_max=thumbnail_url_max,
             youtube_url=f"https://www.youtube.com/watch?v={video_id}",
-            published_at=details.get("published_at")
+            published_at=details.get("published_at"),
+            credits_remaining=credits_remaining
         )
 
     except HTTPException:
@@ -828,7 +871,7 @@ async def health_check():
 
 
 @app.post("/rank", response_model=RankingResponse, tags=["Ranking"])
-async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTasks):
+async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
     """
     Rank videos from a YouTube playlist based on user intent.
     
@@ -885,6 +928,19 @@ async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTas
         for rank, video in enumerate(limited_videos, 1):
             video['rank'] = rank
         
+        # Deduct credits if user is authenticated
+        credits_remaining = None
+        if authorization and authorization.startswith("Bearer "):
+            try:
+                payload = get_authenticated_payload(authorization)
+                google_sub = payload.get("sub")
+                if google_sub:
+                    credits_remaining = deduct_user_credits(google_sub, PLAYLIST_CREDIT_COST)
+            except HTTPException:
+                raise
+            except Exception:
+                logger.warning("Credit deduction failed for playlist ranking")
+
         # Create response
         response = RankingResponse(
             status="success",
@@ -893,7 +949,8 @@ async def rank_playlist(request: RankingRequest, background_tasks: BackgroundTas
             user_intent=request.user_intent,
             total_videos=len(ranked_videos),
             returned_results=len(limited_videos),
-            videos=[VideoResult(**v) for v in limited_videos]
+            videos=[VideoResult(**v) for v in limited_videos],
+            credits_remaining=credits_remaining
         )
         
         logger.info(f"Successfully ranked {len(limited_videos)} videos from {len(ranked_videos)} total")

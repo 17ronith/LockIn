@@ -93,6 +93,9 @@ function App() {
   const [billingConfig, setBillingConfig] = useState(null)
   const [billingError, setBillingError] = useState('')
   const [billingLoading, setBillingLoading] = useState(false)
+  const [creditsLoading, setCreditsLoading] = useState(false)
+  const [billingConfigLoading, setBillingConfigLoading] = useState(false)
+  const [billingConfigError, setBillingConfigError] = useState('')
   const [showBilling, setShowBilling] = useState(false)
 
   const loadingTips = [
@@ -333,23 +336,36 @@ function App() {
   const fetchBillingData = useCallback(async () => {
     if (!authUser || !authToken) return
 
+    setCreditsLoading(true)
+    setBillingConfigLoading(true)
+    setBillingConfigError('')
+
     try {
       const [configResponse, creditsResponse] = await Promise.all([
-        axios.get(`${API_URL}/billing/config`),
+        axios.get(`${API_URL}/billing/config`, { timeout: 10000 }),
         axios.get(`${API_URL}/billing/credits`, {
-          headers: { Authorization: `Bearer ${authToken}` }
+          headers: { Authorization: `Bearer ${authToken}` },
+          timeout: 10000
         })
       ])
       setBillingConfig(configResponse.data)
       setCredits(creditsResponse.data.credits)
     } catch (err) {
       console.error('Billing fetch error:', err)
+      if (!billingConfig) {
+        setBillingConfigError('Unable to load credit packs. Please try again.')
+      }
+    } finally {
+      setCreditsLoading(false)
+      setBillingConfigLoading(false)
     }
-  }, [authUser, authToken])
+  }, [authUser, authToken, billingConfig])
 
   const handleOpenBilling = () => {
     setBillingError('')
+    setBillingConfigError('')
     setShowBilling(true)
+    fetchBillingData()
   }
 
   const handlePurchase = async (packId) => {
@@ -977,10 +993,18 @@ function App() {
                 ✕
               </button>
             </div>
-            {!billingConfig && (
+            {billingConfigLoading && (
               <div className="billing-loading">Loading packs...</div>
             )}
-            {billingConfig && (
+            {!billingConfigLoading && billingConfigError && (
+              <div className="billing-error">
+                <span>{billingConfigError}</span>
+                <button className="billing-retry" type="button" onClick={fetchBillingData}>
+                  Retry
+                </button>
+              </div>
+            )}
+            {!billingConfigLoading && billingConfig && (
               <div className="billing-packs">
                 {billingConfig.packs.map((pack) => (
                   <div className="billing-pack" key={pack.pack_id}>
@@ -1019,7 +1043,7 @@ function App() {
             <div className="navbar-user-wrap">
               <div className="navbar-credits">
                 <span className="credits-label">Credits</span>
-                <span className="credits-value">{credits === null ? '—' : credits}</span>
+                <span className="credits-value">{creditsLoading ? '...' : (credits === null ? '—' : credits)}</span>
                 <button className="credits-buy" type="button" onClick={handleOpenBilling}>
                   Buy credits
                 </button>

@@ -995,16 +995,27 @@ function App() {
                     exit="exit"
                   >
                     <motion.div className="auth-card" variants={item}>
-                      <div className="auth-badge">Free</div>
+                      <div className="auth-brand">
+                        <div className="auth-brand-icon">L</div>
+                        <span className="auth-brand-name">LockIn</span>
+                      </div>
+                      <div className="auth-badge">Free forever</div>
                       <div className="auth-header">
-                        <h2 className="auth-title">Quick sign up</h2>
-                        <p className="auth-subtitle">LockIn is free. Sign up with Google to keep your sessions and streaks.</p>
+                        <h2 className="auth-title">Create your account</h2>
+                        <p className="auth-subtitle">Stay focused with distraction-free video sessions, streaks, and progress tracking.</p>
+                      </div>
+                      <div className="auth-divider">
+                        <span className="auth-divider-text">continue with</span>
                       </div>
                       {!googleClientId && (
                         <div className="error-message">Google login is not configured.</div>
                       )}
                       <div className="auth-google" id="google-signup"></div>
                       {authError && <div className="error-message">{authError}</div>}
+                      <div className="auth-perks">
+                        <span className="auth-perk"><span className="auth-perk-icon">🔒</span> No password needed</span>
+                        <span className="auth-perk"><span className="auth-perk-icon">⚡</span> Instant setup</span>
+                      </div>
                       <div className="auth-footer">
                         <span>Already have an account?</span>
                         <button className="auth-link" type="button" onClick={() => navigate('/login')}>Sign in</button>
@@ -1026,9 +1037,16 @@ function App() {
                     exit="exit"
                   >
                     <motion.div className="auth-card" variants={item}>
+                      <div className="auth-brand">
+                        <div className="auth-brand-icon">L</div>
+                        <span className="auth-brand-name">LockIn</span>
+                      </div>
                       <div className="auth-header">
                         <h2 className="auth-title">Welcome back</h2>
-                        <p className="auth-subtitle">Sign in with Google to continue your focus sessions.</p>
+                        <p className="auth-subtitle">Pick up where you left off — your streaks and sessions are waiting.</p>
+                      </div>
+                      <div className="auth-divider">
+                        <span className="auth-divider-text">continue with</span>
                       </div>
                       {!googleClientId && (
                         <div className="error-message">Google login is not configured.</div>

@@ -51,6 +51,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress noisy third-party HTTP client logs (httpx / httpcore are used by
+# the Supabase client and log every outgoing request at INFO level by default)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 # --- Initialize FastAPI App ---
 app = FastAPI(
     title="LockIn API",

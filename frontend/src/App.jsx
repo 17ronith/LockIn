@@ -125,6 +125,45 @@ function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const googleLoadedRef = useRef(false)
 
+  // Force logout on expired/invalid token — clears all auth state
+  const forceLogout = useCallback(() => {
+    setAuthUser(null)
+    setAuthToken('')
+    setCredits(null)
+    localStorage.removeItem('lockin_user')
+    localStorage.removeItem('lockin_token')
+    // Try to notify the extension that auth was lost
+    try { window.postMessage({ type: 'LOCKIN_AUTH_CLEARED' }, '*') } catch (_) {}
+    navigate('/signup', { replace: true })
+  }, [navigate])
+
+  // Global axios interceptor: 401 = expired token → force re-auth
+  useEffect(() => {
+    const id = axios.interceptors.response.use(
+      res => res,
+      err => {
+        if (err.response?.status === 401) {
+          const storedToken = localStorage.getItem('lockin_token')
+          if (storedToken) forceLogout()
+        }
+        return Promise.reject(err)
+      }
+    )
+    return () => axios.interceptors.response.eject(id)
+  }, [forceLogout])
+
+  // Post auth state to the page so the extension content bridge can pick it up
+  useEffect(() => {
+    const user = authUser
+    const token = authToken
+    try {
+      window.postMessage({
+        type: 'LOCKIN_AUTH_STATE',
+        payload: user && token ? { email: user.email, name: user.given_name || user.name, picture: user.picture, credits } : null
+      }, '*')
+    } catch (_) {}
+  }, [authUser, authToken, credits])
+
   const TailwindIcon = () => (
     <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
       <path

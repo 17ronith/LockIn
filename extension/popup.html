@@ -4,17 +4,55 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LockIn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <div class="card">
-      <div class="brand">LockIn</div>
-      <div class="subtitle">Start a focused session for this video.</div>
+    <div class="shell">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
 
-      <div class="pill">YouTube video detected</div>
+      <header class="hd">
+        <span class="brand">LockIn</span>
+        <div id="userChip" class="user-chip hidden">
+          <img id="userAvatar" class="user-avatar" src="" alt="" />
+          <span id="userName" class="user-name"></span>
+          <span id="userCredits" class="user-credits"></span>
+        </div>
+        <div id="guestBadge" class="guest-badge hidden">Not signed in</div>
+      </header>
 
-      <button id="lockIn" class="primary">Let’s LockIn</button>
-      <div id="status" class="status"></div>
+      <div id="videoCard" class="video-card hidden">
+        <img id="videoThumb" class="video-thumb" src="" alt="" />
+        <div class="video-meta">
+          <div id="videoTitle" class="video-title"></div>
+          <div class="video-tag">YouTube Video</div>
+        </div>
+      </div>
+
+      <div id="noVideoCard" class="no-video-card hidden">
+        <div class="no-video-icon">&#9654;</div>
+        <div class="no-video-text">Open a YouTube video tab to start a session.</div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div id="creditInfo" class="credit-info hidden">
+        <span class="ci-item"><span class="ci-dot dot-blue"></span>Video session — 2 credits</span>
+        <span class="ci-item"><span class="ci-dot dot-teal"></span>Playlist rank — 8 credits</span>
+      </div>
+
+      <button id="lockInBtn" class="cta" disabled>
+        <span id="ctaLabel">Let's LockIn →</span>
+        <span id="ctaSpinner" class="spinner hidden"></span>
+      </button>
+
+      <button id="signInBtn" class="cta-secondary hidden">
+        Sign in to LockIn →
+      </button>
+
+      <div id="statusMsg" class="status"></div>
     </div>
 
     <script src="popup.js"></script>

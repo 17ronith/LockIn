@@ -1,59 +1,92 @@
-const DEFAULT_BASE_URL = 'https://lockin-dev.vercel.app'
-const BUTTON_ID = 'lockin-floating-button'
+const BASE_URL = 'https://lockin-dev.vercel.app'
+const BUTTON_ID = 'lockin-floating-btn'
+
+const CSS = `
+  #${BUTTON_ID} {
+    position: fixed;
+    right: 20px;
+    bottom: 80px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(43, 108, 176, 0.4);
+    background: rgba(10, 13, 20, 0.88);
+    color: #E2E8F0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(43, 108, 176, 0.25), 0 0 0 1px rgba(43, 108, 176, 0.15) inset;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.18s ease;
+    text-decoration: none;
+    animation: lockinPop 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+  }
+  #${BUTTON_ID}:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(43, 108, 176, 0.4);
+    background: rgba(15, 25, 45, 0.94);
+  }
+  #${BUTTON_ID}:active {
+    transform: translateY(0);
+  }
+  #${BUTTON_ID} .lockin-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3B82F6, #2A8F8B);
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.8);
+    flex-shrink: 0;
+  }
+  @keyframes lockinPop {
+    from { opacity: 0; transform: translateY(12px) scale(0.9); }
+    to   { opacity: 1; transform: translateY(0)   scale(1); }
+  }
+`
+
+const injectStyles = () => {
+  if (document.getElementById('lockin-styles')) return
+  const style = document.createElement('style')
+  style.id = 'lockin-styles'
+  style.textContent = CSS
+  document.head.appendChild(style)
+}
 
 const createButton = () => {
   if (document.getElementById(BUTTON_ID)) return
-  const button = document.createElement('button')
-  button.id = BUTTON_ID
-  button.textContent = "Let's LockIn"
-  button.style.position = 'fixed'
-  button.style.right = '18px'
-  button.style.bottom = '18px'
-  button.style.zIndex = '9999'
-  button.style.padding = '10px 16px'
-  button.style.borderRadius = '999px'
-  button.style.border = '1px solid rgba(148, 163, 184, 0.4)'
-  button.style.background = 'rgba(15, 23, 42, 0.92)'
-  button.style.color = '#e5e7eb'
-  button.style.fontSize = '13px'
-  button.style.fontWeight = '600'
-  button.style.cursor = 'pointer'
-  button.style.backdropFilter = 'blur(8px)'
-  button.style.transition = 'transform 0.15s ease, background 0.2s ease'
 
-  button.addEventListener('mouseenter', () => {
-    button.style.transform = 'translateY(-1px)'
-    button.style.background = 'rgba(30, 41, 59, 0.95)'
-  })
-  button.addEventListener('mouseleave', () => {
-    button.style.transform = 'translateY(0)'
-    button.style.background = 'rgba(15, 23, 42, 0.92)'
-  })
+  injectStyles()
 
-  button.addEventListener('click', async () => {
-    const { lockinBaseUrl } = await chrome.storage.sync.get(['lockinBaseUrl'])
-    const baseUrl = (lockinBaseUrl || DEFAULT_BASE_URL).trim()
-    const target = `${baseUrl.replace(/\/$/, '')}/?video=${encodeURIComponent(window.location.href)}`
+  const btn = document.createElement('button')
+  btn.id = BUTTON_ID
+  btn.innerHTML = '<span class="lockin-dot"></span> LockIn'
+  btn.title = 'Start a LockIn focus session for this video'
+
+  btn.addEventListener('click', () => {
+    const target = `${BASE_URL}/?video=${encodeURIComponent(window.location.href)}`
     window.open(target, '_blank', 'noopener')
   })
 
-  document.body.appendChild(button)
+  document.body.appendChild(btn)
 }
 
-const isWatchPage = () => {
-  return window.location.pathname === '/watch'
+const removeButton = () => {
+  const existing = document.getElementById(BUTTON_ID)
+  if (existing) existing.remove()
 }
+
+const isWatchPage = () => window.location.pathname === '/watch'
 
 const maybeInject = () => {
-  if (isWatchPage()) {
-    createButton()
-  } else {
-    const existing = document.getElementById(BUTTON_ID)
-    if (existing) existing.remove()
-  }
+  if (isWatchPage()) createButton()
+  else removeButton()
 }
 
-const observer = new MutationObserver(maybeInject)
-observer.observe(document.documentElement, { childList: true, subtree: true })
+// Re-check on YouTube's SPA navigation
+const navObserver = new MutationObserver(maybeInject)
+navObserver.observe(document.documentElement, { childList: true, subtree: true })
 
 maybeInject()

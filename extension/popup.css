@@ -300,6 +300,186 @@ body {
 }
 .status.err { color: rgba(248, 113, 113, 0.85); }
 
+/* URL paste section ----------------------------------------------------- */
+.url-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideUp 0.28s ease;
+}
+
+.url-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.55);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.url-label-icon {
+  font-size: 13px;
+  color: rgba(42, 143, 139, 0.7);
+  line-height: 1;
+}
+
+.url-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.25s;
+  position: relative;
+}
+
+/* glowing halo when focused */
+.url-input-wrap.focused {
+  border-color: rgba(43, 108, 176, 0.55);
+  box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.12), 0 0 18px rgba(43, 108, 176, 0.18);
+}
+
+/* valid URL state */
+.url-input-wrap.valid {
+  border-color: rgba(42, 143, 139, 0.55);
+  box-shadow: 0 0 0 3px rgba(42, 143, 139, 0.1), 0 0 18px rgba(42, 143, 139, 0.15);
+}
+
+/* subtle idle shimmer line at bottom */
+.url-input-wrap::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 0%;
+  height: 2px;
+  background: linear-gradient(90deg, #2B6CB0, #2A8F8B);
+  border-radius: 0 0 10px 10px;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+}
+.url-input-wrap.focused::after,
+.url-input-wrap.valid::after {
+  width: 100%;
+  opacity: 1;
+}
+
+.url-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 10px 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  color: #CBD5E1;
+  caret-color: #3B82F6;
+  min-width: 0;
+}
+.url-input::placeholder {
+  color: rgba(148, 163, 184, 0.33);
+}
+
+.url-go-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-left: 1px solid rgba(148, 163, 184, 0.1);
+  background: transparent;
+  color: rgba(148, 163, 184, 0.3);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s, color 0.18s;
+  font-family: 'Inter', sans-serif;
+}
+.url-go-btn:not(:disabled) {
+  color: #2A8F8B;
+  background: rgba(42, 143, 139, 0.1);
+  animation: goReady 0.3s ease;
+}
+.url-go-btn:not(:disabled):hover {
+  background: rgba(42, 143, 139, 0.22);
+  color: #5EEAD4;
+}
+.url-go-btn:disabled { cursor: not-allowed; }
+
+@keyframes goReady {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.22); }
+  70% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* URL thumbnail preview */
+.url-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(42, 143, 139, 0.06);
+  border: 1px solid rgba(42, 143, 139, 0.2);
+  border-radius: 9px;
+  padding: 8px 10px;
+  animation: previewIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes previewIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.url-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.url-preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.url-preview-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #CBD5E1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.url-preview-tag {
+  font-size: 10px;
+  color: rgba(94, 234, 212, 0.75);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.url-preview-tag::before {
+  content: '';
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: #2A8F8B;
+  animation: blink 1.4s ease infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 /* Utilities ------------------------------------------------------------- */
 .hidden { display: none !important; }
 @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }

@@ -31,9 +31,30 @@
         </div>
       </div>
 
-      <div id="noVideoCard" class="no-video-card hidden">
-        <div class="no-video-icon">&#9654;</div>
-        <div class="no-video-text">Open a YouTube video tab to start a session.</div>
+      <!-- URL paste input (always shown for logged-in users) -->
+      <div id="urlSection" class="url-section hidden">
+        <div class="url-label">
+          <span class="url-label-icon">⌁</span>
+          Paste any YouTube link
+        </div>
+        <div class="url-input-wrap" id="urlInputWrap">
+          <input
+            type="text"
+            id="urlInput"
+            class="url-input"
+            placeholder="youtube.com/watch?v=…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="urlGoBtn" class="url-go-btn" disabled>→</button>
+        </div>
+        <div id="urlPreview" class="url-preview hidden">
+          <img id="urlThumb" class="url-thumb" src="" alt="" />
+          <div class="url-preview-meta">
+            <div id="urlPreviewTitle" class="url-preview-title">YouTube Video</div>
+            <div class="url-preview-tag">Ready to LockIn</div>
+          </div>
+        </div>
       </div>
 
       <div class="sep"></div>

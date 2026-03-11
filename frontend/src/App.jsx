@@ -3,11 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './App.css'
-import lockInLogo from './assets/Color Scheme for Focus Jan 26 2026 (1).png'
-import reactIcon from './assets/React Icon.png'
-import viteIcon from './assets/Vite.js Icon.png'
-import openaiIcon from './assets/OpenAI Logo Icon 50.png'
-import llamaIcon from './assets/LLaMA Model Icon.png'
+import { ShaderCanvas } from './components/ui/animated-shader-hero'
+import { TextShimmer } from './components/ui/text-shimmer'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const FALLBACK_PACKS = [
@@ -24,6 +21,15 @@ const EXIT_PHRASE = "I don't want to achieve my goals"
 const DEFAULT_FOCUS_MINUTES = 25
 const DEFAULT_BREAK_MINUTES = 5
 const LOADING_DURATION_SECONDS = 30
+const LOADING_PHRASES = [
+  'Focusing right now…',
+  'Loading your environment…',
+  'Warming up the model…',
+  'Crunching the data…',
+  'Finding the best content…',
+  'Tuning the rankings…',
+  'Almost locked in…',
+]
 const spring = { type: 'spring', stiffness: 80, damping: 18 }
 const pageVariants = {
   initial: { opacity: 0, scale: 0.98, filter: 'blur(10px)' },
@@ -86,6 +92,7 @@ function App() {
   const [readyToStart, setReadyToStart] = useState(false)
   const [loadingSecondsLeft, setLoadingSecondsLeft] = useState(LOADING_DURATION_SECONDS)
   const [loadingTipIndex, setLoadingTipIndex] = useState(0)
+  const [phraseIdx, setPhraseIdx] = useState(0)
   const [loadingZeroAt, setLoadingZeroAt] = useState(null)
   const [loadingStartedAt, setLoadingStartedAt] = useState(null)
   const [focusPaused, setFocusPaused] = useState(false)
@@ -662,6 +669,7 @@ function App() {
     setLoadingStartedAt(startTime)
     setLoadingSecondsLeft(durationSeconds)
     setLoadingTipIndex(0)
+    setPhraseIdx(0)
     setLoadingZeroAt(null)
 
     const countdown = setInterval(() => {
@@ -674,9 +682,14 @@ function App() {
       setLoadingTipIndex((prev) => (prev + 1) % loadingTips.length)
     }, 3000)
 
+    const phrases = setInterval(() => {
+      setPhraseIdx((prev) => (prev + 1) % LOADING_PHRASES.length)
+    }, 2200)
+
     return () => {
       clearInterval(countdown)
       clearInterval(tips)
+      clearInterval(phrases)
     }
   }, [loading])
 
@@ -916,36 +929,25 @@ function App() {
   return (
     <div className="app">
       <div className="animated-bg">
-        <span className="orb orb-blue"></span>
-        <span className="orb orb-teal"></span>
+        {location.pathname === '/' ? (
+          <ShaderCanvas />
+        ) : (
+          <>
+            <span className="orb orb-blue"></span>
+            <span className="orb orb-teal"></span>
+          </>
+        )}
       </div>
       {loading && (
-        <div className="loading-overlay">
-          <div className="loading-card">
-            <div className="loading-title">Fetching results...</div>
-            {loadingSecondsLeft === 0 && loadingZeroAt && (Date.now() - loadingZeroAt > 1000) ? (
-              <div className="loading-one-moment">
-                One moment
-                <span className="loading-dots"></span>
-              </div>
-            ) : (
-              <div
-                className="loading-ring"
-                style={{
-                  '--progress': Math.max(0, Math.min(100, (1 - (loadingSecondsLeft / LOADING_DURATION_SECONDS)) * 100))
-                }}
-              >
-                <div className="loading-ring-inner">{`${Math.ceil(loadingSecondsLeft)}s`}</div>
-              </div>
-            )}
-            <div className="loading-subtitle">Take a breath while we prepare your focus session.</div>
-            <div className="loading-tip">{loadingTips[loadingTipIndex]}</div>
-            <div className="loading-breath">
-              <span className="breath-dot"></span>
-              <span className="breath-dot"></span>
-              <span className="breath-dot"></span>
-            </div>
-          </div>
+        <div className="loading-pill">
+          <span className="loading-pill-dot"></span>
+          {loadingSecondsLeft > 0 ? (
+            <span className="loading-pill-text">
+              {Math.ceil(loadingSecondsLeft)}s
+            </span>
+          ) : (
+            <span className="loading-pill-text">Almost there…</span>
+          )}
         </div>
       )}
       {showSessionSetup && (
@@ -1223,8 +1225,14 @@ function App() {
                     animate="animate"
                     exit="exit"
                   >
+                    <motion.div className="landing-badge" variants={item}>
+                      <span className="landing-badge-dot"></span>
+                      Multimodal AI · Distraction-Free Learning
+                    </motion.div>
+
                     <motion.h1 className="landing-title" variants={item}>
-                      Focus Your Learning
+                      Focus Your<br />
+                      <span className="landing-title-accent">Learning</span>
                     </motion.h1>
                     <motion.p className="landing-subtitle" variants={item}>
                       Transform YouTube playlists into a calm, distraction-free learning flow using multimodal analysis.
@@ -1268,29 +1276,49 @@ function App() {
 
                         {error && <div className="error-message">{error}</div>}
 
-                        <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%' }}>
-                          {loading ? (
-                            <>
-                              <span className="spinner"></span>
-                              Ranking Videos...
-                            </>
-                          ) : (
-                            "Let's Lock In"
-                          )}
-                        </button>
+                        {loading ? (
+                          <div className="loading-phrase-wrap">
+                            <AnimatePresence mode="wait">
+                              <motion.span
+                                key={phraseIdx}
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -5 }}
+                                transition={{ duration: 0.3, ease: 'easeOut' }}
+                              >
+                                <TextShimmer
+                                  as="span"
+                                  duration={2}
+                                  spread={2.5}
+                                  baseColor="rgba(148, 163, 184, 0.5)"
+                                  glowColor="#a5f3fc"
+                                >
+                                  {LOADING_PHRASES[phraseIdx]}
+                                </TextShimmer>
+                              </motion.span>
+                            </AnimatePresence>
+                          </div>
+                        ) : (
+                          <button type="submit" className="btn-minimal" style={{ width: '100%' }}>
+                            Lock In →
+                          </button>
+                        )}
                       </form>
                     </motion.div>
 
                     <motion.div className="feature-grid" variants={item}>
                       <div className="feature-card">
+                        <div className="feature-card-icon">⚡</div>
                         <h3>Smart Ranking</h3>
                         <p>Find the most relevant videos using multimodal understanding.</p>
                       </div>
                       <div className="feature-card">
+                        <div className="feature-card-icon">🔒</div>
                         <h3>Distraction Free</h3>
                         <p>Stay in a calm workspace that keeps you focused.</p>
                       </div>
                       <div className="feature-card">
+                        <div className="feature-card-icon">✦</div>
                         <h3>Deep Analysis</h3>
                         <p>Text and visual signals combine for better learning flow.</p>
                       </div>

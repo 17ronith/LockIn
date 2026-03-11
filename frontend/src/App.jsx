@@ -1278,9 +1278,40 @@ function App() {
                             </AnimatePresence>
                           </div>
                         ) : (
-                          <button type="submit" className="btn-minimal" style={{ width: '100%' }}>
-                            Lock In →
-                          </button>
+                          <motion.button
+                            type="submit"
+                            className="btn-minimal"
+                            style={{ width: '100%' }}
+                            whileHover="hover"
+                            initial="rest"
+                            animate="rest"
+                            variants={{
+                              rest: { scale: 1 },
+                              hover: { scale: 1.018 }
+                            }}
+                            transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                          >
+                            <motion.span
+                              className="btn-minimal-content"
+                              variants={{
+                                rest: { x: 0 },
+                                hover: { x: 3 }
+                              }}
+                              transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                            >
+                              Lock In
+                            </motion.span>
+                            <motion.span
+                              className="btn-minimal-arrow"
+                              variants={{
+                                rest: { x: 0, opacity: 0.55 },
+                                hover: { x: 5, opacity: 1 }
+                              }}
+                              transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                            >
+                              →
+                            </motion.span>
+                          </motion.button>
                         )}
                       </form>
                     </motion.div>

@@ -5,6 +5,7 @@ import axios from 'axios'
 import './App.css'
 import { ShaderCanvas } from './components/ui/animated-shader-hero'
 import { TextShimmer } from './components/ui/text-shimmer'
+import { MenuVertical } from './components/ui/menu-vertical'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const FALLBACK_PACKS = [
@@ -97,6 +98,7 @@ function App() {
   const [loadingStartedAt, setLoadingStartedAt] = useState(null)
   const [focusPaused, setFocusPaused] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
   const [authUser, setAuthUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('lockin_user') || 'null')
@@ -546,7 +548,7 @@ function App() {
       const container = document.getElementById(targetId)
       if (container && !container.dataset.rendered) {
         window.google.accounts.id.renderButton(container, {
-          theme: 'outline',
+          theme: 'filled_black',
           size: 'large',
           width: 320,
           shape: 'pill'
@@ -1142,73 +1144,50 @@ function App() {
         )}
       </AnimatePresence>
 
-      {/* Navigation */}
-      <nav className="navbar">
-        <div className="navbar-content">
-          <button className="navbar-brand" onClick={handleHome}>LockIn</button>
-          {authUser ? (
-            <div className="navbar-user-wrap">
-              <div className="navbar-credits">
-                <span className="credits-label">Credits</span>
-                <span className="credits-value">{creditsLoading ? '...' : (credits === null ? '—' : credits)}</span>
-                <button className="credits-buy" type="button" onClick={handleOpenBilling}>
-                  Buy credits
-                </button>
-              </div>
-              <div className="navbar-user" ref={userMenuRef}>
-                <button
-                  className="user-trigger"
-                  onClick={() => setShowUserMenu((prev) => !prev)}
-                  aria-haspopup="menu"
-                  aria-expanded={showUserMenu}
-                >
-                  {authUser.picture ? (
-                    <img
-                      src={authUser.picture}
-                      alt=""
-                      className="user-avatar"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="user-avatar-fallback">
-                      {(authUser.given_name || authUser.name || 'U').charAt(0)}
-                    </span>
-                  )}
-                  {authUser.given_name || authUser.name || 'Account'}
-                  <span className="user-caret">⌄</span>
-                </button>
-                {showUserMenu && (
-                  <div className="user-menu" role="menu">
-                    <button className="user-menu-item" type="button" disabled>
-                      Settings
-                    </button>
-                    <button className="user-menu-item" type="button" onClick={handleLogout}>
-                      Log out
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="navbar-auth">
+      {/* Navigation — hidden on auth routes */}
+      {!isAuthRoute && (
+        <nav className="navbar">
+          <div className="navbar-content">
+            <button className="navbar-brand" onClick={handleHome}>LockIn</button>
+            <div className="navbar-right">
+              {authUser && (
+                <div className="navbar-credits">
+                  <span className="credits-label">Credits</span>
+                  <span className="credits-value">{creditsLoading ? '...' : (credits === null ? '—' : credits)}</span>
+                  <button className="credits-buy" type="button" onClick={handleOpenBilling}>
+                    Buy
+                  </button>
+                </div>
+              )}
               <button
-                className="nav-auth-link"
-                type="button"
-                onClick={() => navigate('/login')}
+                className="navbar-hamburger"
+                onClick={() => setShowMenu(true)}
+                aria-label="Open menu"
               >
-                Sign in
-              </button>
-              <button
-                className="nav-auth-btn"
-                type="button"
-                onClick={() => navigate('/signup')}
-              >
-                Get started
+                <span /><span /><span />
               </button>
             </div>
-          )}
-        </div>
-      </nav>
+          </div>
+        </nav>
+      )}
+
+      {!isAuthRoute && (
+        <MenuVertical
+          isOpen={showMenu}
+          onClose={() => setShowMenu(false)}
+          color="#a5f3fc"
+          skew={-3}
+          menuItems={authUser ? [
+            { label: 'Home', onClick: () => { handleHome(); } },
+            { label: 'Buy Credits', onClick: () => { handleOpenBilling(); } },
+            { label: 'Log out', onClick: () => { handleLogout(); } },
+          ] : [
+            { label: 'Home', onClick: () => navigate('/') },
+            { label: 'Sign in', onClick: () => navigate('/login') },
+            { label: 'Get started', onClick: () => navigate('/signup') },
+          ]}
+        />
+      )}
 
       {/* Main Content */}
       <div className="container">
@@ -1331,80 +1310,164 @@ function App() {
             <Route
               path="/signup"
               element={
-                <AnimationWrapper key={location.pathname}>
-                  <motion.section
-                    className="auth-page"
-                    variants={stagger}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                  >
-                    <motion.div className="auth-card" variants={item}>
-                      <div className="auth-brand">
-                        <div className="auth-brand-icon">L</div>
-                        <span className="auth-brand-name">LockIn</span>
-                      </div>
-                      <div className="auth-badge">Free forever</div>
-                      <div className="auth-header">
-                        <h2 className="auth-title">Create your account</h2>
-                        <p className="auth-subtitle">Stay focused with distraction-free video sessions, streaks, and progress tracking.</p>
-                      </div>
-                      <div className="auth-divider">
-                        <span className="auth-divider-text">continue with</span>
-                      </div>
-                      {!googleClientId && (
-                        <div className="error-message">Google login is not configured.</div>
-                      )}
-                      <div className="auth-google" id="google-signup"></div>
-                      {authError && <div className="error-message">{authError}</div>}
-                      <div className="auth-perks">
-                        <span className="auth-perk"><span className="auth-perk-icon">🔒</span> No password needed</span>
-                        <span className="auth-perk"><span className="auth-perk-icon">⚡</span> Instant setup</span>
-                      </div>
-                      <div className="auth-footer">
-                        <span>Already have an account?</span>
-                        <button className="auth-link" type="button" onClick={() => navigate('/login')}>Sign in</button>
-                      </div>
+                  <div className="auth-fullscreen">
+                    {/* Purple glow orbs */}
+                    <div className="auth-glow-top" />
+                    <motion.div
+                      className="auth-glow-top-pulse"
+                      animate={{ opacity: [0.15, 0.3, 0.15], scale: [0.98, 1.02, 0.98] }}
+                      transition={{ duration: 8, repeat: Infinity, repeatType: 'mirror' }}
+                    />
+                    <motion.div
+                      className="auth-glow-bottom"
+                      animate={{ opacity: [0.3, 0.5, 0.3], scale: [1, 1.1, 1] }}
+                      transition={{ duration: 6, repeat: Infinity, repeatType: 'mirror', delay: 1 }}
+                    />
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.6 }}
+                      className="auth-card-wrap"
+                    >
+                      <motion.div
+                        className="auth-card-tilt"
+                        onMouseMove={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect()
+                          const x = (e.clientX - r.left - r.width / 2) / 20
+                          const y = (e.clientY - r.top - r.height / 2) / 20
+                          e.currentTarget.style.transform = `rotateY(${x}deg) rotateX(${-y}deg)`
+                        }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'rotateY(0deg) rotateX(0deg)' }}
+                      >
+                        {/* Animated border beams */}
+                        <div className="auth-beams">
+                          <motion.div className="auth-beam auth-beam-top"
+                            animate={{ left: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-right"
+                            animate={{ top: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 0.6 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-bottom"
+                            animate={{ right: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 1.2 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-left"
+                            animate={{ bottom: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 1.8 }}
+                          />
+                        </div>
+
+                        <div className="auth-card">
+                          <div className="auth-brand">
+                            <div className="auth-brand-icon">L</div>
+                            <span className="auth-brand-name">LockIn</span>
+                          </div>
+                          <div className="auth-badge">Free forever</div>
+                          <div className="auth-header">
+                            <h2 className="auth-title">Create your account</h2>
+                            <p className="auth-subtitle">Stay focused with distraction-free video sessions, streaks, and progress tracking.</p>
+                          </div>
+                          <div className="auth-divider">
+                            <span className="auth-divider-text">continue with</span>
+                          </div>
+                          {!googleClientId && (
+                            <div className="error-message">Google login is not configured.</div>
+                          )}
+                          <div className="auth-google" id="google-signup"></div>
+                          {authError && <div className="error-message">{authError}</div>}
+                          <div className="auth-perks">
+                            <span className="auth-perk"><span className="auth-perk-icon">🔒</span> No password needed</span>
+                            <span className="auth-perk"><span className="auth-perk-icon">⚡</span> Instant setup</span>
+                          </div>
+                          <div className="auth-footer">
+                            <span>Already have an account?</span>
+                            <button className="auth-link" type="button" onClick={() => navigate('/login')}>Sign in</button>
+                          </div>
+                        </div>
+                      </motion.div>
                     </motion.div>
-                  </motion.section>
-                </AnimationWrapper>
+                  </div>
               }
             />
             <Route
               path="/login"
               element={
-                <AnimationWrapper key={location.pathname}>
-                  <motion.section
-                    className="auth-page"
-                    variants={stagger}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                  >
-                    <motion.div className="auth-card" variants={item}>
-                      <div className="auth-brand">
-                        <div className="auth-brand-icon">L</div>
-                        <span className="auth-brand-name">LockIn</span>
-                      </div>
-                      <div className="auth-header">
-                        <h2 className="auth-title">Welcome back</h2>
-                        <p className="auth-subtitle">Pick up where you left off — your streaks and sessions are waiting.</p>
-                      </div>
-                      <div className="auth-divider">
-                        <span className="auth-divider-text">continue with</span>
-                      </div>
-                      {!googleClientId && (
-                        <div className="error-message">Google login is not configured.</div>
-                      )}
-                      <div className="auth-google" id="google-login"></div>
-                      {authError && <div className="error-message">{authError}</div>}
-                      <div className="auth-footer">
-                        <span>Need an account?</span>
-                        <button className="auth-link" type="button" onClick={() => navigate('/signup')}>Sign up</button>
-                      </div>
+                  <div className="auth-fullscreen">
+                    <div className="auth-glow-top" />
+                    <motion.div
+                      className="auth-glow-top-pulse"
+                      animate={{ opacity: [0.15, 0.3, 0.15], scale: [0.98, 1.02, 0.98] }}
+                      transition={{ duration: 8, repeat: Infinity, repeatType: 'mirror' }}
+                    />
+                    <motion.div
+                      className="auth-glow-bottom"
+                      animate={{ opacity: [0.3, 0.5, 0.3], scale: [1, 1.1, 1] }}
+                      transition={{ duration: 6, repeat: Infinity, repeatType: 'mirror', delay: 1 }}
+                    />
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.6 }}
+                      className="auth-card-wrap"
+                    >
+                      <motion.div
+                        className="auth-card-tilt"
+                        onMouseMove={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect()
+                          const x = (e.clientX - r.left - r.width / 2) / 20
+                          const y = (e.clientY - r.top - r.height / 2) / 20
+                          e.currentTarget.style.transform = `rotateY(${x}deg) rotateX(${-y}deg)`
+                        }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'rotateY(0deg) rotateX(0deg)' }}
+                      >
+                        <div className="auth-beams">
+                          <motion.div className="auth-beam auth-beam-top"
+                            animate={{ left: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-right"
+                            animate={{ top: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 0.6 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-bottom"
+                            animate={{ right: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 1.2 }}
+                          />
+                          <motion.div className="auth-beam auth-beam-left"
+                            animate={{ bottom: ['-50%', '100%'] }}
+                            transition={{ duration: 2.5, ease: 'easeInOut', repeat: Infinity, repeatDelay: 1, delay: 1.8 }}
+                          />
+                        </div>
+
+                        <div className="auth-card">
+                          <div className="auth-brand">
+                            <div className="auth-brand-icon">L</div>
+                            <span className="auth-brand-name">LockIn</span>
+                          </div>
+                          <div className="auth-header">
+                            <h2 className="auth-title">Welcome back</h2>
+                            <p className="auth-subtitle">Pick up where you left off — your streaks and sessions are waiting.</p>
+                          </div>
+                          <div className="auth-divider">
+                            <span className="auth-divider-text">continue with</span>
+                          </div>
+                          {!googleClientId && (
+                            <div className="error-message">Google login is not configured.</div>
+                          )}
+                          <div className="auth-google" id="google-login"></div>
+                          {authError && <div className="error-message">{authError}</div>}
+                          <div className="auth-footer">
+                            <span>Need an account?</span>
+                            <button className="auth-link" type="button" onClick={() => navigate('/signup')}>Sign up</button>
+                          </div>
+                        </div>
+                      </motion.div>
                     </motion.div>
-                  </motion.section>
-                </AnimationWrapper>
+                  </div>
               }
             />
             <Route

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-// ─── Default shader (dark nebula / space) ────────────────────────────────────
+// ─── Default shader (purple nebula / space) ───────────────────────────────────
 const SHADER_SRC = `#version 300 es
 /*
  * Adapted from Matthias Hurrle (@atzedent)
@@ -47,10 +47,10 @@ void main(void) {
     uv += .1 * cos(i * vec2(.1 + .01 * i, .8) + i * i + T * .5 + .1 * uv.x);
     vec2 p = uv;
     float d = length(p);
-    col += .00125 / d * (cos(sin(i) * vec3(1, 2, 3)) + 1.);
+    col += .00125 / d * (cos(sin(i) * vec3(2.5, 1.0, 3.5)) + 1.);
     float b = noise(i + p + bg * 1.731);
     col += .002 * b / length(max(p, vec2(b * p.x * .02, p.y)));
-    col = mix(col, vec3(bg * .25, bg * .137, bg * .05), d);
+    col = mix(col, vec3(bg * .20, bg * .03, bg * .25), d);
   }
   O = vec4(col, 1);
 }`

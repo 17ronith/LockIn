@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
@@ -6,6 +6,8 @@ import './App.css'
 import { ShaderCanvas } from './components/ui/animated-shader-hero'
 import { TextShimmer } from './components/ui/text-shimmer'
 import { MenuVertical } from './components/ui/menu-vertical'
+
+const CelestialBloomShader = lazy(() => import('./components/ui/celestial-bloom-shader.jsx'))
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const FALLBACK_PACKS = [
@@ -133,6 +135,7 @@ function App() {
   const navigate = useNavigate()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const googleLoadedRef = useRef(false)
+  const useCelestialBloom = location.pathname === '/results' || location.pathname === '/watch'
 
   // Force logout on expired/invalid token — clears all auth state
   const forceLogout = useCallback(() => {
@@ -933,6 +936,17 @@ function App() {
       <div className="animated-bg">
         {location.pathname === '/' ? (
           <ShaderCanvas />
+        ) : useCelestialBloom ? (
+          <Suspense
+            fallback={
+              <>
+                <span className="orb orb-blue"></span>
+                <span className="orb orb-teal"></span>
+              </>
+            }
+          >
+            <CelestialBloomShader />
+          </Suspense>
         ) : (
           <>
             <span className="orb orb-blue"></span>

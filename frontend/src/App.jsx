@@ -6,6 +6,7 @@ import './App.css'
 import { ShaderCanvas } from './components/ui/animated-shader-hero'
 import { TextShimmer } from './components/ui/text-shimmer'
 import { MenuVertical } from './components/ui/menu-vertical'
+import NewsLetter from './components/ui/pinky-news-letter.jsx'
 
 const CelestialBloomShader = lazy(() => import('./components/ui/celestial-bloom-shader.jsx'))
 
@@ -136,6 +137,7 @@ function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const googleLoadedRef = useRef(false)
   const useCelestialBloom = location.pathname === '/results' || location.pathname === '/watch'
+  const usePlayerWarpBackground = location.pathname === '/results' && Boolean(selectedVideo)
 
   // Force logout on expired/invalid token — clears all auth state
   const forceLogout = useCallback(() => {
@@ -936,6 +938,8 @@ function App() {
       <div className="animated-bg">
         {location.pathname === '/' ? (
           <ShaderCanvas />
+        ) : usePlayerWarpBackground ? (
+          <NewsLetter backgroundOnly className="active-player-page-shader" />
         ) : useCelestialBloom ? (
           <Suspense
             fallback={
@@ -1648,6 +1652,7 @@ function App() {
                         </div>
                       </motion.div>
                     )}
+
                   </motion.div>
                 </AnimationWrapper>
               }
